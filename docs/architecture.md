@@ -469,7 +469,17 @@ architectural ambiguities before implementation:
    second piece, and OCR'd pages of poor scans yield low-quality text that is
    flagged via `ocr_extracted` rather than filtered.
 
-4. **Initial `BaseReranker` implementation.** The spec allows a literal
+4. ~~**Initial `BaseReranker` implementation.**~~ **Resolved in Phase 5.**
+   `PassthroughReranker` remains the default when no reranker is provisioned,
+   and `CrossEncoderReranker` is available when one is. Measured against the
+   real corpus, the cross-encoder removes the clearest failure of vector-only
+   ranking — an "Author Contributions" section appearing in the top three for
+   a question about method — but its ordering of genuinely relevant academic
+   passages is not consistently better. The model is trained on web search
+   relevance, not academic prose. Judging this properly needs a labelled query
+   set, which is the recommended next step rather than further tuning.
+
+5. **Superseded — original reranker note.** The spec allows a literal
    no-op (pass the ranked list through unchanged) as an acceptable Phase 4
    starting point. Recommended: implement it as an explicit
    `PassthroughReranker`, not by skipping the abstraction — this keeps the

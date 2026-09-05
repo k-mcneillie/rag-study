@@ -2,19 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, dev]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, dev]
 
 permissions:
   contents: read
 
 jobs:
-  test-and-lint:
+  quality:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12"] # Standardized to your scientific environment baseline
+        python-version: ["3.12"]
 
     steps:
       - name: Checkout repository
@@ -24,22 +24,35 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip' # Automatically caches standard packages and remote git installations
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install .[dev]
 
-      - name: Lint and Format Check (Ruff)
+      - name: Lint and format check (Ruff)
         run: |
           ruff check .
           ruff format --check .
 
-      - name: Type Check (Mypy)
-        run: |
-          mypy src/
+      - name: Type check (Mypy)
+        run: mypy src/
 
-      - name: Run Tests with Coverage (Pytest)
-        run: |
-          pytest
+      # Integration tests need a live MariaDB and local model weights, neither
+      # of which exists on a runner. They are deselected rather than skipped so
+      # that a genuine failure cannot hide behind a skip.
+      #
+      # The threshold is lower than the local one because the database and
+      # model-loading paths are only reachable with those services present:
+      # the unit suite alone reaches about 90%, the full local suite 99%.
+      # Deselecting integration tests must not be able to mask a real drop in
+      # the code CI can actually exercise, hence a floor rather than no gate.
+      - name: Unit tests (Pytest)
+        run: pytest -m "not integration" --cov-fail-under=85
+
+      # The dependency rules are the architecture. They are checked separately
+      # so that a violation is reported as its own failure rather than as one
+      # test among many.
+      - name: Architecture rules
+        run: pytest tests/test_architecture.py --no-cov -q
