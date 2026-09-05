@@ -48,13 +48,13 @@ src/
     │   ├── __init__.py
     │   ├── interfaces.py         # BaseExtractor, BaseChunker, BaseEmbedder
     │   ├── extraction/
-    │   │   └── pdf.py            # PDFExtractor
+    │   │   ├── pdf.py            # PDFExtractor (layout-aware, via pymupdf4llm)
+    │   │   └── cleaning.py       # encoding repair + page-furniture removal
     │   ├── chunking/
-    │   │   ├── markdown.py
-    │   │   ├── recursive.py
-    │   │   └── semantic.py
+    │   │   ├── splitters.py      # MarkdownHeaderChunker, RecursiveChunker
+    │   │   └── pipeline.py       # ChunkingPipeline + contamination filters
     │   ├── embedding/
-    │   │   └── local_sentence_transformer.py
+    │   │   └── local.py          # LocalSentenceTransformerEmbedder
     │   └── orchestrator.py       # IngestionOrchestrator
     │
     └── retrieval/
@@ -151,11 +151,15 @@ Chunk
   headers              list[str]
   metadata             dict[str, Any] — untrusted
 
+ExtractedDocument
+  document            Document
+  pages               tuple[Page, ...]
+
 EmbeddedChunk
   chunk               Chunk
-  vector               list[float] | np.ndarray
+  vector               tuple[float, ...] — immutable, keeps domain numpy-free
   model_name           [provenance] e.g. "all-MiniLM-L6-v2"
-  model_dim            [provenance] e.g. 384
+  model_dimension      [provenance] derived from the vector, so it cannot drift
 
 RankedChunk
   chunk               Chunk
@@ -193,7 +197,7 @@ Each interface answers: input, output, responsible for, does not know about.
 **`BaseExtractor`**
 ```text
 INPUT:     Path
-OUTPUT:    list[Page]
+OUTPUT:    ExtractedDocument (the Document record plus its Pages)
 RESPONSIBLE FOR:  document-specific extraction + cleaning, page boundaries, metadata
 DOES NOT KNOW ABOUT: chunking, embedding, ranking, storage, prompting
 ```
@@ -250,6 +254,7 @@ layer. It only has the methods each pipeline actually needs:
 ```python
 class Repository(Protocol):
     # used by ingestion
+    def document_exists(self, content_hash: str) -> bool: ...
     def save_document(self, document: Document) -> None: ...
     def save_pages(self, pages: list[Page]) -> None: ...
     def save_chunks_with_embeddings(self, chunks: list[EmbeddedChunk]) -> None: ...
@@ -433,13 +438,30 @@ architectural ambiguities before implementation:
    `VECTOR INDEX ... DISTANCE=cosine` are all available and verified working.
    The BLOB + numpy fallback is not needed; if a future deployment targets an
    older server, only the column type and the ranker implementation change.
-2. **Initial `BaseReranker` implementation.** The spec allows a literal
+2. ~~**Semantic chunking.**~~ **Deferred in Phase 3, deliberately.** Structural
+   (Markdown heading) plus recursive splitting produces well-formed chunks with
+   full section provenance on the real corpus. Semantic chunking would require
+   the chunker to hold an embedding function, weakening the rule that a chunker
+   knows nothing about embeddings, and would embed the corpus twice. It remains
+   a drop-in behind `BaseChunker` if retrieval quality later shows a need.
+
+3. **Contamination handling is evidence-based, not exhaustive.** Phase 3
+   measured the real corpus and handled what actually occurs: duplicate
+   documents, figure/chart label text, reference lists, page furniture, and
+   fragments. Mid-sentence line breaks were measured at zero occurrences —
+   `pymupdf4llm` already rejoins wrapped lines — so no code was written for
+   them. Two known limitations are accepted for now: a single table larger than
+   `chunk_size` will be split across chunks and lose its header row on the
+   second piece, and OCR'd pages of poor scans yield low-quality text that is
+   flagged via `ocr_extracted` rather than filtered.
+
+4. **Initial `BaseReranker` implementation.** The spec allows a literal
    no-op (pass the ranked list through unchanged) as an acceptable Phase 4
    starting point. Recommended: implement it as an explicit
    `PassthroughReranker`, not by skipping the abstraction — this keeps the
    orchestrator wiring identical to what it'll look like once a real
    cross-encoder reranker is added.
-3. **Scope/filter parameter on `similarity_search`.** No access-control or
+5. **Scope/filter parameter on `similarity_search`.** No access-control or
    multi-document-scope requirement exists yet. Recommended: give
    `similarity_search` an optional `filters: dict | None = None` parameter
    now (unused, always `None` in Phase 1–4) so a future scope/tenant filter
@@ -448,10 +470,10 @@ architectural ambiguities before implementation:
    by "clean interfaces that make future complexity possible without
    requiring it today" (spec §34), rather than actually implementing
    access control now.
-4. **`content_hash` on `Document`.** Included in §4/§6 for basic dedup, but
+6. **`content_hash` on `Document`.** Included in §4/§6 for basic dedup, but
    no dedup *behavior* is specified anywhere in the original spec.
-   Recommended: store it, but don't build dedup logic until it's actually
-   requested.
+   Resolved in Phase 3: the corpus contained a byte-identical duplicate pair,
+   so `Repository.document_exists` and an orchestrator skip were added.
 
 ## Architectural review (spec §35, answered)
 

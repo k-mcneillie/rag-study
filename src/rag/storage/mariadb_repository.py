@@ -51,6 +51,21 @@ class MariaDBRepository:
         self.embedding_dimension = embedding_dimension
         self.max_top_k = max_top_k
 
+    def document_exists(self, content_hash: str) -> bool:
+        """Report whether a document with this content has been stored.
+
+        Args:
+            content_hash: Digest of the document's bytes.
+
+        Returns:
+            ``True`` if a document with that content hash is already stored.
+        """
+        statement = select(DocumentRow.id).where(
+            DocumentRow.content_hash == content_hash
+        )
+        with self._session_factory() as session:
+            return session.execute(statement.limit(1)).first() is not None
+
     def save_document(self, document: Document) -> None:
         """Persist a document record.
 

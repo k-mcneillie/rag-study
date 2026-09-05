@@ -29,6 +29,21 @@ ALLOWED_SEARCH_FILTERS = frozenset({"document_id"})
 class Repository(Protocol):
     """Persistence operations required by the ingestion and retrieval pipelines."""
 
+    def document_exists(self, content_hash: str) -> bool:
+        """Report whether a document with this content has been stored.
+
+        Lets ingestion skip a document it has already processed. Re-ingesting
+        the same content would otherwise fill retrieval results with duplicate
+        passages that crowd out other sources.
+
+        Args:
+            content_hash: Digest of the document's bytes.
+
+        Returns:
+            ``True`` if a document with that content hash is already stored.
+        """
+        ...
+
     def save_document(self, document: Document) -> None:
         """Persist a document record.
 
