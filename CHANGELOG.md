@@ -166,6 +166,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tests/test_app_module.py` reproduces Chainlit's loader rather than
   importing the module the usual way.
 
+- The reasoning step rendered *below* the answer it preceded. Chainlit stamps
+  a step's start time only when the step is entered as a context manager, so a
+  step created and sent by hand carried no start time and was ordered by its
+  last update instead. The step is now entered through its context manager,
+  and the answer message is not constructed until the first answer fragment
+  arrives, so neither can be timestamped ahead of the reasoning it followed.
+
 - The OpenAI-compatible client leaked reasoning into the answer when a
   `<think>` tag arrived split across two streamed fragments. Text that might
   still become a tag is now held back until it is resolved, and flushed when

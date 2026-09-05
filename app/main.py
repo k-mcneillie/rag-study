@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Iterator
+from contextlib import AsyncExitStack
 from typing import Any
 
 import chainlit as cl
@@ -255,40 +256,49 @@ async def answer(message: cl.Message) -> None:
         ).send()
         return
 
-    reply = cl.Message(content="", elements=_source_elements(context))
-    answer = await _stream_answer(chat_model, context, reply)
-    if answer is None:
+    streamed = await _stream_answer(chat_model, context)
+    if streamed is None:
         return
 
+    reply, answer = streamed
     await _offer_rating(reply, query=query, answer=answer, context=context)
 
 
 async def _stream_answer(
-    chat_model: BaseChatModel, context: PromptContext, reply: cl.Message
-) -> Answer | None:
+    chat_model: BaseChatModel, context: PromptContext
+) -> tuple[cl.Message, Answer] | None:
     """Stream one answer into the UI, reasoning apart from the answer.
 
     The model client is a synchronous generator, so each fragment is pulled in
     a worker thread. That keeps the event loop free without pushing ``async``
     into the package.
 
-    The reasoning step is created only if reasoning actually arrives, so a
-    model that does not reason, or one asked not to, leaves no empty step
-    behind.
+    Two things here exist to make the transcript read in the order the work
+    happened — reasoning, then answer. The step is entered as a context
+    manager, because that is the only path on which Chainlit stamps a step's
+    start time, and a step without one is ordered by its last update, which
+    lands it *below* the answer it preceded. And the answer message is not
+    built until the first answer fragment arrives, so it cannot be timestamped
+    earlier than the reasoning it followed.
+
+    Both are lazy, so a model that does not reason, or one asked not to,
+    leaves no empty step behind.
 
     Args:
         chat_model: The model to answer with.
         context: The assembled retrieval context.
-        reply: The message the answer is streamed into.
 
     Returns:
-        The completed answer, or ``None`` if generation failed and the failure
-        has already been reported to the reader.
+        The message the answer was streamed into and the completed answer, or
+        ``None`` if generation failed and the failure has already been
+        reported to the reader.
     """
     deltas = chat_model.stream(context)
     answer_parts: list[str] = []
     reasoning_parts: list[str] = []
+    reply: cl.Message | None = None
     reasoning_step: cl.Step | None = None
+    reasoning = AsyncExitStack()
 
     try:
         while (delta := await _next(deltas)) is not None:
@@ -297,22 +307,32 @@ async def _stream_answer(
                     reasoning_step = cl.Step(
                         name="Reasoning", type="llm", default_open=False
                     )
-                    await reasoning_step.send()
+                    await reasoning.enter_async_context(reasoning_step)
                 reasoning_parts.append(delta.text)
                 await reasoning_step.stream_token(delta.text)
-            else:
-                answer_parts.append(delta.text)
-                await reply.stream_token(delta.text)
+                continue
+
+            if reply is None:
+                await reasoning.aclose()
+                reply = cl.Message(content="", elements=_source_elements(context))
+            answer_parts.append(delta.text)
+            await reply.stream_token(delta.text)
     except GenerationError as exc:
-        if reasoning_step is not None:
-            await reasoning_step.update()
         await cl.Message(content=f"**No answer.** {exc}").send()
         return None
+    finally:
+        await reasoning.aclose()
 
-    if reasoning_step is not None:
-        await reasoning_step.update()
+    if reply is None:
+        reply = cl.Message(
+            content=(
+                "The model reasoned but produced no answer. Its reasoning is "
+                "above; try the question again, or a shorter one."
+            ),
+            elements=_source_elements(context),
+        )
 
-    return Answer(
+    return reply, Answer(
         text="".join(answer_parts),
         reasoning="".join(reasoning_parts),
         model_name=chat_model.model_name,
