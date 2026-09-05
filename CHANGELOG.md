@@ -86,6 +86,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     dependency rules — that the pipelines never import each other, that the
     domain stays framework-free, and that only storage imports SQLAlchemy.
 
+- Phase 5 integration and reranking:
+  - `CrossEncoderReranker`, which scores each query/passage pair directly
+    rather than comparing pre-computed vectors, applied to the ranker's
+    shortlist because it is too slow to run over a store. Both scores are
+    kept on every result, so a change in ordering can be traced to the stage
+    that caused it.
+  - `scripts/ingest.py` and `scripts/query.py`, runnable demonstrations of
+    each pipeline. Both are assembly only; the behaviour lives in the package.
+  - A full-cycle integration test that ingests a generated PDF with one
+    pipeline and retrieves it with the other, through the storage contract.
+  - Optional reranker configuration. An unset `RAG_RERANKER_MODEL_PATH`
+    means the stage is skipped; a path that is set but unloadable is an
+    error, so a misconfiguration is never mistaken for a deliberate choice.
+
 ### Changed
 
 - `pyproject.toml` now describes this project rather than the upstream
@@ -105,6 +119,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BaseExtractor` returns an `ExtractedDocument` rather than a bare list of
   pages: the extractor reads the file, so it is the only component positioned
   to derive the content hash and the document's metadata.
+
+- CI now runs on `main` and `dev`, deselects integration tests rather than
+  letting them skip silently, and checks the architecture rules as their own
+  step so a dependency violation is reported on its own terms.
 
 ### Removed
 

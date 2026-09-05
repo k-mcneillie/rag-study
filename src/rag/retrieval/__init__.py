@@ -16,6 +16,7 @@ from rag.retrieval.prompting.augmenter import (
     TemplatePromptAugmenter,
 )
 from rag.retrieval.ranking.cosine import CosineSimilarityRanker
+from rag.retrieval.reranking.cross_encoder import CrossEncoderReranker
 from rag.retrieval.reranking.passthrough import PassthroughReranker
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "BaseRanker",
     "BaseReranker",
     "CosineSimilarityRanker",
+    "CrossEncoderReranker",
     "PassthroughReranker",
     "PromptTemplateNotFoundError",
     "RetrievalOrchestrator",

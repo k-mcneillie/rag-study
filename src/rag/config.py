@@ -54,6 +54,22 @@ def _require(env: Mapping[str, str], name: str) -> str:
     return value
 
 
+def _optional_path(env: Mapping[str, str], name: str) -> Path | None:
+    """Read an optional filesystem path from the environment.
+
+    Args:
+        env: Mapping of environment variable names to values.
+        name: Variable name to read, without the ``RAG_`` prefix.
+
+    Returns:
+        The path, or ``None`` if the variable is unset. An unset path means
+        the feature it configures is simply not used, never that a default
+        location is searched.
+    """
+    raw = env.get(f"{ENV_PREFIX}{name}", "").strip()
+    return Path(raw) if raw else None
+
+
 def _optional_int(env: Mapping[str, str], name: str, default: int) -> int:
     """Read an optional integer environment variable.
 
@@ -144,6 +160,9 @@ class Settings:
             may ask for, bounding the cost of any single query.
         embedding_batch_size: How many chunks are encoded at once, bounding
             peak memory when embedding a large document.
+        reranker_model_path: Local directory holding the cross-encoder used
+            for reranking, or ``None`` to keep the initial ranking.
+        reranker_batch_size: How many query/passage pairs are scored at once.
         max_document_bytes: Largest source document that will be opened.
         max_document_pages: Most pages extracted from one document.
         chunk_size: Target maximum chunk size, in characters.
@@ -156,6 +175,8 @@ class Settings:
     embedding_dimension: int
     max_top_k: int = 100
     embedding_batch_size: int = 32
+    reranker_model_path: Path | None = None
+    reranker_batch_size: int = 16
     max_document_bytes: int = 100 * 1024 * 1024
     max_document_pages: int = 2000
     chunk_size: int = 1200
@@ -184,6 +205,8 @@ class Settings:
             embedding_dimension=_optional_int(env, "EMBEDDING_DIMENSION", 384),
             max_top_k=_optional_int(env, "MAX_TOP_K", 100),
             embedding_batch_size=_optional_int(env, "EMBEDDING_BATCH_SIZE", 32),
+            reranker_model_path=_optional_path(env, "RERANKER_MODEL_PATH"),
+            reranker_batch_size=_optional_int(env, "RERANKER_BATCH_SIZE", 16),
             max_document_bytes=_optional_int(
                 env, "MAX_DOCUMENT_BYTES", 100 * 1024 * 1024
             ),
