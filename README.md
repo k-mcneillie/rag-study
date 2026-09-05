@@ -61,6 +61,10 @@ cp .env.example .env
 Edit `.env` and set `RAG_DB_PASSWORD` to the password you just chose. **Never
 commit `.env`** — it is gitignored, and it should stay that way.
 
+The `RAG_LLM_*` variables are optional: they configure the model that answers,
+and retrieval works without any of them. Set them when you get to
+[answering](#get-an-answer-not-just-context).
+
 ## 4. Fetch the model weights
 
 This is the **only step that needs the internet**, and it happens now, not at
@@ -136,8 +140,8 @@ python scripts/query.py "..." --top-k 3 --show-prompt --document-id <id>
 ```text
 prompt: retrieval_context v1   reranker: cross-encoder
 
-[1] score=4.094 (initial 0.629)  page 2  ... > 1 Introduction
-    Figure 1: DPO optimizes for human preferences while avoiding ...
+[1] score=4.094 (initial 0.629)  page 2  2 Method > 2.1 Objective
+    <the opening of the matching passage, from your own documents>
 ```
 
 Both scores are shown: what the vector search thought, and what the reranker
@@ -159,9 +163,22 @@ model's reasoning in a collapsed step, and offers thumbs up/down under each
 answer. Ratings are appended to `results/feedback.jsonl` with the passages the
 answer was given.
 
-The model is a service, chosen by configuration — `ollama`, `vllm`, or
-anything speaking the OpenAI chat completions API. Nothing is downloaded and
-no answer leaves the machine when the service is local. See
+The model is a service, reached over HTTP and chosen by configuration:
+
+```bash
+RAG_LLM_PROVIDER=ollama                     # or vllm, or openai
+RAG_LLM_BASE_URL=http://localhost:11434     # vLLM and OpenAI want the /v1 root
+RAG_LLM_MODEL=deepseek-r1:14b
+RAG_LLM_API_KEY=                            # only for a service that needs one
+```
+
+`openai` covers anything speaking the OpenAI chat completions API — LM Studio,
+llama.cpp, OpenAI, Together, Groq, OpenRouter. Pointing at a different service
+is an environment change, not a code change; adding one it cannot yet speak to
+is a `BaseChatModel` and one line in `rag.generation.providers`.
+
+The model is never downloaded — it must already exist on that service — and no
+answer leaves the machine when the service is local. See
 [docs/interface.md](docs/interface.md).
 
 ## Run the tests
@@ -274,6 +291,11 @@ to be a different source.
 | `error in your SQL syntax ... VECTOR` | MariaDB older than 11.7 |
 | Integration tests skipped | No database or weights present; the unit suite still runs |
 | Ingestion reports `0 chunks` | Scanned PDF with no text layer — OCR needs Tesseract installed |
+| `Cannot reach the model service at ...` | The service is not running, or `RAG_LLM_BASE_URL` is wrong |
+| `Model ... is not available at ...` | Not provisioned on that service. It is never pulled for you (`ollama pull <model>`) |
+| `... rejected the credential (HTTP 401)` | `RAG_LLM_API_KEY` is missing or wrong for a service that requires one |
+| `Unknown model provider '...'` | `RAG_LLM_PROVIDER` must be `ollama`, `vllm` or `openai` |
+| `ModuleNotFoundError: chainlit` | The interface is an optional extra: `pip install -e ".[ui]"` |
 
 ---
 

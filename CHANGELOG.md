@@ -131,6 +131,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     OpenAI, Together, Groq and OpenRouter. Shared HTTP plumbing, including
     bearer authentication and error mapping, lives in
     `rag.generation.transport`.
+  - Credentials for hosted services: `RAG_LLM_API_KEY` is sent as a bearer
+    token when set and omitted entirely when not, and is excluded from
+    `repr` for the same reason the database password is. Base URLs that
+    already end in `/v1`, as vLLM's and OpenAI's conventionally do, are
+    handled without repeating the segment — the alternative is a bare 404
+    that reads exactly like a missing model.
   - Which service answers is configuration (`RAG_LLM_PROVIDER` and the
     `RAG_LLM_*` variables), resolved by `rag.generation.providers`. This is
     the one place constructor injection was not enough: the service that
@@ -156,6 +162,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     citations, and the feedback format — including a plain statement that vLLM
     is supported by protocol and has not been run against a live vLLM server.
 
+- Bandit security scanning, in `just check-all` and in CI, over `src/`, `app/`
+  and `scripts/`. Ruff's flake8-bandit (`S`) rules already ran over every
+  file; the two do not overlap completely, and Bandit reports severity and
+  confidence, so a finding can be triaged rather than only suppressed. Tests
+  are excluded, because they deliberately contain dummy credentials used to
+  prove real ones never escape. The scan is clean at the time of writing.
+
 ### Fixed
 
 - The chat interface raised `AttributeError` from `dataclasses` on startup.
@@ -165,6 +178,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   there. An ordinary `import` succeeds where Chainlit fails, so
   `tests/test_app_module.py` reproduces Chainlit's loader rather than
   importing the module the usual way.
+
+- The README's example output quoted a passage extracted from a document in
+  `docs/pool/`. The document is a public paper, so nothing confidential was
+  exposed, but copying corpus text into a tracked file is the pattern the
+  pool rule exists to prevent. Replaced with a synthetic sample.
 
 - The reasoning step rendered *below* the answer it preceded. Chainlit stamps
   a step's start time only when the step is entered as a context manager, so a

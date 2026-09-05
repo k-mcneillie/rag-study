@@ -36,6 +36,13 @@ jobs:
           ruff check .
           ruff format --check .
 
+      # Bandit as well as Ruff's flake8-bandit (`S`) rules: the two do not
+      # overlap completely, and Bandit reports severity and confidence, so a
+      # finding can be triaged rather than only suppressed. Any finding fails
+      # the build.
+      - name: Security scan (Bandit)
+        run: bandit -c pyproject.toml -q -r src/ app/ scripts/
+
       # The entry points are checked as well as the package. They hold real
       # logic — assembly, streaming, session state — and the interface is not
       # installed here, so this also proves the app type-checks against a

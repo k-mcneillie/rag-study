@@ -2,8 +2,8 @@
 default:
     @just --list
 
-# Run all quality gates (Lint, Format, Types, Tests)
-check-all: lint format-check type-check test
+# Run all quality gates (Lint, Format, Types, Security, Tests)
+check-all: lint format-check type-check security test
 
 # Run the pytest suite with code coverage tracking
 test:
@@ -24,6 +24,10 @@ format:
 # Run static type checking across the package and its entry points
 type-check:
     mypy src/ app/ scripts/
+
+# Scan shipped code for security issues (Ruff's `S` rules run in `lint` too)
+security:
+    bandit -c pyproject.toml -q -r src/ app/ scripts/
 
 # Launch the chat interface (needs the `ui` extra, a database, and a model service)
 ui:
