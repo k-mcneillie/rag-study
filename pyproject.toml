@@ -31,6 +31,10 @@ dependencies = [
     # Ingestion (Phase 3): PDF extraction.
     "PyMuPDF>=1.24.0",
     "pymupdf4llm>=0.0.17",
+    # Ingestion (Phase 3): encoding repair, and structure- and size-aware
+    # splitting. Both are kept behind this project's own interfaces.
+    "ftfy>=6.2.0",
+    "langchain-text-splitters>=0.3.0",
     # Embedding (Phase 3): local, offline sentence-transformer models.
     "sentence-transformers>=3.0.0",
     # Generation (Phase 6): HTTP client for the answering model service.
