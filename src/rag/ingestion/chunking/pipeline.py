@@ -26,6 +26,7 @@ import re
 from collections.abc import Sequence
 
 from rag.domain.models import Chunk, Page
+from rag.ingestion.chunking.semantic import SemanticChunker
 from rag.ingestion.chunking.splitters import MarkdownHeaderChunker, RecursiveChunker
 from rag.ingestion.interfaces import BaseChunker
 
@@ -59,6 +60,7 @@ class ChunkingPipeline(BaseChunker):
         chunk_overlap: int = 150,
         min_chunk_chars: int = 40,
         drop_references: bool = True,
+        semantic_chunker: SemanticChunker | None = None,
     ) -> None:
         """Initialise the pipeline.
 
@@ -70,6 +72,10 @@ class ChunkingPipeline(BaseChunker):
             drop_references: Whether to discard chunks from reference lists.
                 Set to ``False`` to retain them, for example to answer
                 questions about what a paper cites.
+            semantic_chunker: When supplied, oversized sections are divided
+                where their subject changes rather than at a character
+                boundary. Costs an embedding pass over every sentence, so it
+                is opt-in rather than the default.
 
         Raises:
             ValueError: If ``min_chunk_chars`` is negative, or the chunk sizes
@@ -84,6 +90,7 @@ class ChunkingPipeline(BaseChunker):
         self._recursive = RecursiveChunker(
             chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
+        self._semantic = semantic_chunker
 
     def chunk(self, pages: Sequence[Page]) -> list[Chunk]:
         """Chunk pages and remove contamination.
@@ -98,12 +105,35 @@ class ChunkingPipeline(BaseChunker):
 
         sized: list[Chunk] = []
         for section in sections:
-            sized.extend(self._recursive.split_oversized(section))
+            sized.extend(self._split_oversized(section))
 
         return [
             tagged
             for chunk in sized
             if (tagged := self._tag(chunk)) is not None and self._keep(tagged)
+        ]
+
+    def _split_oversized(self, section: Chunk) -> list[Chunk]:
+        """Bring one section within budget.
+
+        Semantic splitting is preferred when a semantic chunker was supplied,
+        since a boundary placed where the subject changes beats one placed at
+        a character count. The recursive splitter still runs afterwards, as a
+        backstop for any piece the semantic pass left too long.
+
+        Args:
+            section: The section to divide.
+
+        Returns:
+            The resulting chunks, each within budget.
+        """
+        if self._semantic is None:
+            return self._recursive.split_oversized(section)
+
+        return [
+            piece
+            for part in self._semantic.refine(section)
+            for piece in self._recursive.split_oversized(part)
         ]
 
     def _tag(self, chunk: Chunk) -> Chunk:
@@ -125,6 +155,7 @@ class ChunkingPipeline(BaseChunker):
             text=chunk.text,
             section=chunk.section,
             headers=chunk.headers,
+            ocr_extracted=chunk.ocr_extracted,
             metadata={**chunk.metadata, SECTION_TYPE_KEY: REFERENCES_SECTION},
         )
 

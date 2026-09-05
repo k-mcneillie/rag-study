@@ -114,11 +114,10 @@ class IngestionOrchestrator:
 
         embedded = self._embedder.embed(chunks)
 
-        # The document and its pages are written before the chunks, so a chunk
-        # never references a document that is not yet stored.
-        self._repository.save_document(document)
-        self._repository.save_pages(extracted.pages)
-        self._repository.save_chunks_with_embeddings(embedded)
+        # Written as one unit: a document stored without its chunks would be
+        # invisible to retrieval, yet its content hash would make every retry
+        # look like a duplicate to skip.
+        self._repository.save_ingested_document(document, extracted.pages, embedded)
 
         logger.info("Ingested %s: %d chunks.", source.name, len(embedded))
         return IngestionResult(

@@ -101,10 +101,15 @@ def test_page_provenance_is_preserved() -> None:
 
 
 def test_ocr_provenance_reaches_the_chunk() -> None:
-    """A chunk from an OCR'd page is marked, so it can be filtered later."""
+    """A chunk from an OCR'd page is marked as provenance, not as metadata.
+
+    The pipeline sets this, not the document, so it belongs beside the other
+    provenance fields rather than in the untrusted metadata bucket.
+    """
     chunks = MarkdownHeaderChunker().chunk([_page("# A\nText.", ocr=True)])
 
-    assert chunks[0].metadata["ocr_extracted"] is True
+    assert chunks[0].ocr_extracted is True
+    assert "ocr_extracted" not in chunks[0].metadata
 
 
 def test_oversized_chunks_are_split_with_provenance_intact() -> None:

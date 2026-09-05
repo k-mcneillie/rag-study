@@ -91,24 +91,17 @@ class RecordingRepository:
         del content_hash
         return False
 
-    def save_document(self, document: object) -> None:
+    def save_ingested_document(
+        self,
+        document: object,
+        pages: Sequence[object],
+        embedded_chunks: Sequence[object],
+    ) -> None:
         """Ignore writes; retrieval never calls this.
 
         Args:
             document: Ignored.
-        """
-
-    def save_pages(self, pages: Sequence[object]) -> None:
-        """Ignore writes; retrieval never calls this.
-
-        Args:
             pages: Ignored.
-        """
-
-    def save_chunks_with_embeddings(self, embedded_chunks: Sequence[object]) -> None:
-        """Ignore writes; retrieval never calls this.
-
-        Args:
             embedded_chunks: Ignored.
         """
 

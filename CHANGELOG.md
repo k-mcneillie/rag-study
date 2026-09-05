@@ -105,6 +105,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prompt in use is not a code change and a past result can be reproduced by
   restoring the configuration that produced it.
 
+- Review remediation:
+  - `SemanticChunker`, a standalone chunker that cuts where sentence-to-
+    sentence similarity drops rather than at a character count. It depends on
+    `TextEmbedder`, a two-method description of the capability it needs, so it
+    imports no model or model-loading library and is tested with fixed
+    vectors. Composable into `ChunkingPipeline` and opt-in, since it embeds
+    every sentence.
+  - `docs/system-overview.md`, a complete account of the system including its
+    weaknesses, and `docs/future-work.md`, covering what is deliberately not
+    built.
+  - A rewritten README: five checkable setup steps, worked examples, and a
+    troubleshooting table.
+
+### Fixed
+
+- `scripts/create_schema.py` now reports schema drift. `CREATE TABLE` only
+  adds missing tables, so a column added to the models after a database was
+  created was silently absent until a query failed at run time with an
+  unhelpful "unknown column" error — which is exactly what happened when
+  `ocr_extracted` was added. The script now compares the models against the
+  live database and prints the `ALTER` statements needed. Columns are read
+  from `information_schema` because SQLAlchemy's MySQL reflection cannot
+  parse MariaDB's `VECTOR` type.
+
+- **Ingestion was not atomic, and could silently lose a document.** The
+  document, its pages, and its chunks were written in three transactions, so
+  a failure during chunk writing left a document row carrying its content
+  hash but no chunks. That document was invisible to retrieval, while its
+  hash made every retry look like a duplicate to skip — lost permanently and
+  silently. The three repository methods are replaced by one atomic
+  `save_ingested_document`, with a regression test reproducing the original
+  scenario.
+
 ### Changed
 
 - `pyproject.toml` now describes this project rather than the upstream
@@ -125,6 +158,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pages: the extractor reads the file, so it is the only component positioned
   to derive the content hash and the document's metadata.
 
+- Chunk and page rows are bulk-inserted rather than merged one at a time,
+  which previously cost a database round trip per chunk. A 272-chunk paper
+  now ingests end to end in about eight seconds.
+- `ocr_extracted` moved from the untrusted `metadata` mapping onto `Chunk` as
+  a first-class field. The pipeline sets it, not the document, so it belongs
+  with the provenance rather than in the bucket documented as untrusted.
+- Re-ingesting a document now replaces what is stored rather than failing,
+  including when the same content arrives under a different filename.
 - CI now runs on `main` and `dev`, deselects integration tests rather than
   letting them skip silently, and checks the architecture rules as their own
   step so a dependency violation is reported on its own terms.

@@ -76,6 +76,31 @@ class LocalSentenceTransformerEmbedder(BaseEmbedder):
         """
         return self._dimension
 
+    def embed_texts(self, texts: Sequence[str]) -> list[tuple[float, ...]]:
+        """Embed plain strings.
+
+        Satisfies the narrow embedding capability the semantic chunker
+        depends on, so the same loaded model can serve both without the
+        chunker importing anything from this package.
+
+        Args:
+            texts: The texts to embed.
+
+        Returns:
+            One vector per input text, in the same order.
+        """
+        if not texts:
+            return []
+
+        vectors = self._model.encode(
+            list(texts),
+            batch_size=self.batch_size,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+            normalize_embeddings=True,
+        )
+        return [tuple(float(value) for value in vector) for vector in vectors]
+
     def embed(self, chunks: Sequence[Chunk]) -> list[EmbeddedChunk]:
         """Embed chunks in batches.
 

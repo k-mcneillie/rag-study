@@ -121,6 +121,10 @@ class Chunk:
         section: Structural heading path for the chunk, if one was detected
             (for example ``"2 Methods > 2.1 Sampling"``).
         headers: The ordered heading trail leading to this chunk.
+        ocr_extracted: Whether this chunk's text came from OCR rather than a
+            document's own text layer. Recorded as provenance rather than in
+            ``metadata`` because the pipeline sets it, not the document, and
+            retrieval may legitimately treat OCR'd text with less confidence.
         id: Opaque internal identifier.
         metadata: Untrusted, chunker-derived metadata.
     """
@@ -130,6 +134,7 @@ class Chunk:
     text: str
     section: str | None = None
     headers: tuple[str, ...] = ()
+    ocr_extracted: bool = False
     id: str = field(default_factory=_new_id)
     metadata: dict[str, Any] = field(default_factory=dict)
 

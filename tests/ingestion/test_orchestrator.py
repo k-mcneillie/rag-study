@@ -142,6 +142,7 @@ class RecordingRepository:
             known_hashes: Content hashes to report as already stored.
         """
         self.known_hashes = known_hashes or set()
+        self.writes = 0
         self.documents: list[Document] = []
         self.pages: list[Page] = []
         self.embedded: list[EmbeddedChunk] = []
@@ -157,30 +158,22 @@ class RecordingRepository:
         """
         return content_hash in self.known_hashes
 
-    def save_document(self, document: Document) -> None:
-        """Record a document.
-
-        Args:
-            document: The document to record.
-        """
-        self.documents.append(document)
-
-    def save_pages(self, pages: Sequence[Page]) -> None:
-        """Record pages.
-
-        Args:
-            pages: The pages to record.
-        """
-        self.pages.extend(pages)
-
-    def save_chunks_with_embeddings(
-        self, embedded_chunks: Sequence[EmbeddedChunk]
+    def save_ingested_document(
+        self,
+        document: Document,
+        pages: Sequence[Page],
+        embedded_chunks: Sequence[EmbeddedChunk],
     ) -> None:
-        """Record embedded chunks.
+        """Record one document written as a single unit.
 
         Args:
-            embedded_chunks: The embedded chunks to record.
+            document: The document recorded.
+            pages: Its pages.
+            embedded_chunks: Its embedded chunks.
         """
+        self.writes += 1
+        self.documents.append(document)
+        self.pages.extend(pages)
         self.embedded.extend(embedded_chunks)
 
 
@@ -307,3 +300,17 @@ def test_a_non_positive_batch_size_is_rejected(tmp_path: Path) -> None:
     """
     with pytest.raises(ValueError, match="batch_size"):
         LocalSentenceTransformerEmbedder(tmp_path, batch_size=0)
+
+
+def test_a_document_is_written_in_a_single_operation() -> None:
+    """Ingestion writes once, so a failure cannot leave a partial document.
+
+    A document stored without its chunks is invisible to retrieval, yet its
+    content hash makes every later attempt look like a duplicate to skip, so
+    a partial write would remove it from the store permanently and silently.
+    """
+    orchestrator, store = _orchestrator()
+
+    orchestrator.ingest(Path("paper.pdf"))
+
+    assert store.writes == 1
