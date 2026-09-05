@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `LocalSentenceTransformerEmbedder`, loading weights only from a local
     directory with remote code refused, failing loudly rather than falling
     back to a download.
+  - `scripts/create_schema.py`, an administrative operation, because the
+    application user deliberately holds no DDL privileges and so cannot
+    create its own tables.
   - `IngestionOrchestrator`, holding workflow only, which reports per-document
     failures instead of raising so one bad file cannot end a batch, and skips
     documents whose content has already been ingested.

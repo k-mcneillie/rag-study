@@ -190,6 +190,16 @@ GRANT ALL PRIVILEGES ON rag_study_test.* TO 'rag_app'@'localhost';
 
 Then copy `.env.example` to `.env` and fill it in. **Never commit `.env`.**
 
+Because the application user holds no DDL privileges, it cannot create its own
+tables — an account that can only read and write rows cannot alter the schema,
+whatever a bug or an injected statement might attempt. Create the schema once,
+using an administrative account:
+
+```bash
+RAG_ADMIN_DB_URL='mysql+pymysql://admin@localhost/rag_study?unix_socket=/tmp/mysql.sock' \
+    python scripts/create_schema.py
+```
+
 ## Local model assets
 
 Python dependencies and model weights are provisioned separately. Weights live

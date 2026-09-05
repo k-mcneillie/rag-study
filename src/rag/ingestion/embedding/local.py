@@ -29,6 +29,24 @@ if TYPE_CHECKING:  # pragma: no cover - import cost avoided at runtime
 logger = logging.getLogger(__name__)
 
 
+def _embedding_dimension(model: SentenceTransformer) -> int:
+    """Read a model's output width across sentence-transformers versions.
+
+    The accessor was renamed in recent releases; the old name still works but
+    warns, so the new one is preferred where present.
+
+    Args:
+        model: The loaded model.
+
+    Returns:
+        The embedding dimensionality.
+    """
+    accessor = getattr(model, "get_embedding_dimension", None) or (
+        model.get_sentence_embedding_dimension
+    )
+    return int(accessor() or 0)
+
+
 class ModelUnavailableError(RuntimeError):
     """Raised when a local model cannot be loaded.
 
@@ -73,7 +91,7 @@ class LocalSentenceTransformerEmbedder(BaseEmbedder):
         self.batch_size = batch_size
         self._model_name = model_name or model_path.name
         self._model = self._load(model_path)
-        self._dimension = int(self._model.get_sentence_embedding_dimension() or 0)
+        self._dimension = _embedding_dimension(self._model)
 
     @staticmethod
     def _load(model_path: Path) -> SentenceTransformer:
