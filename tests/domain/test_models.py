@@ -7,6 +7,8 @@ import dataclasses
 import pytest
 
 from rag.domain.models import (
+    Answer,
+    AnswerDelta,
     Chunk,
     Document,
     EmbeddedChunk,
@@ -110,3 +112,35 @@ def test_prompt_context_carries_its_template_identity() -> None:
 
     assert context.prompt_metadata.prompt_name == "retrieval_context"
     assert context.prompt_metadata.prompt_version == "v1"
+
+
+def test_answer_delta_defaults_to_answer_text() -> None:
+    """A fragment is part of the answer unless it says otherwise."""
+    assert AnswerDelta(text="Hello.").reasoning is False
+    assert AnswerDelta(text="Hmm.", reasoning=True).reasoning is True
+
+
+def test_answer_keeps_reasoning_separate_from_the_answer() -> None:
+    """Reasoning is carried alongside the answer, never folded into it."""
+    answer = Answer(
+        text="Part-time staff were excluded [1].",
+        reasoning="Passage one addresses the sampling frame.",
+        model_name="deepseek-r1:14b",
+        prompt_metadata=PromptMetadata("retrieval_context", "v1"),
+    )
+
+    assert answer.reasoning not in answer.text
+    assert answer.prompt_metadata.prompt_version == "v1"
+
+
+def test_an_answer_is_immutable() -> None:
+    """An answer's attribution cannot be rewritten after the fact."""
+    answer = Answer(
+        text="t",
+        reasoning="",
+        model_name="m",
+        prompt_metadata=PromptMetadata("retrieval_context", "v1"),
+    )
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        answer.model_name = "something-else"  # type: ignore[misc]

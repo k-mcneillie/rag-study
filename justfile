@@ -21,10 +21,18 @@ format-check:
 format:
     ruff format .
 
-# Run static type checking across the source directory
+# Run static type checking across the package and its entry points
 type-check:
-    mypy src/
+    mypy src/ app/ scripts/
+
+# Launch the chat interface (needs the `ui` extra, a database, and a model service)
+ui:
+    chainlit run app/main.py
+
+# Answer one question from the terminal, without the interface
+ask query:
+    python scripts/answer.py "{{query}}"
 
 # Clean up temporary cache directories and build artifacts
 clean:
-    rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov dist build src/*.egg-info
+    rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov dist build src/*.egg-info .files

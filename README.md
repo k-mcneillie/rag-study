@@ -1,9 +1,10 @@
 # rag-study
 
 A simple, modular, offline-capable Retrieval-Augmented Generation package.
-Documents go in; ranked, cited context comes out. It runs with **no internet
-connection**: model weights are local files, and nothing is downloaded while
-the system is running.
+Documents go in; ranked, cited context comes out — and, through a chat
+interface that sits outside the package, an answer with its sources. It runs
+with **no internet connection**: model weights are local files, and nothing is
+downloaded while the system is running.
 
 ---
 
@@ -142,8 +143,26 @@ prompt: retrieval_context v1   reranker: cross-encoder
 Both scores are shown: what the vector search thought, and what the reranker
 thought. `--show-prompt` prints the full assembled prompt.
 
-**No language model is called.** The package stops at assembled context. What
-you do with it is the next system's job.
+**The retrieval pipeline calls no language model.** It stops at assembled
+context. Answering is a separate package on the far side of that contract.
+
+## Get an answer, not just context
+
+```bash
+pip install -e ".[ui]"     # the chat interface; not needed to retrieve
+just ui                    # http://localhost:8000
+just ask "How does DPO avoid training a reward model?"    # no browser
+```
+
+The interface streams the answer, shows the passages it cited, keeps the
+model's reasoning in a collapsed step, and offers thumbs up/down under each
+answer. Ratings are appended to `results/feedback.jsonl` with the passages the
+answer was given.
+
+The model is a service, chosen by configuration — `ollama`, `vllm`, or
+anything speaking the OpenAI chat completions API. Nothing is downloaded and
+no answer leaves the machine when the service is local. See
+[docs/interface.md](docs/interface.md).
 
 ## Run the tests
 
@@ -227,6 +246,7 @@ it in; nothing else changes:
 | Reranking | `BaseReranker` | `RetrievalOrchestrator(reranker=...)` |
 | Prompt assembly | `BasePromptAugmenter` | `RetrievalOrchestrator(prompt_augmenter=...)` |
 | Database | `Repository` protocol | either orchestrator |
+| Answering model | `BaseChatModel` | one line in `rag.generation.providers` |
 
 ## Prompt versioning and injection
 
@@ -260,6 +280,7 @@ to be a different source.
 # Further reading
 
 - [docs/system-overview.md](docs/system-overview.md) — how every part fits together
+- [docs/interface.md](docs/interface.md) — the answering layer, the chat UI, and feedback
 - [docs/architecture.md](docs/architecture.md) — design decisions, threat model, open questions
 - [docs/future-work.md](docs/future-work.md) — what is deliberately not built yet
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branch strategy and QA requirements

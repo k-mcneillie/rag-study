@@ -118,7 +118,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A rewritten README: five checkable setup steps, worked examples, and a
     troubleshooting table.
 
+- Phase 6 answering and the chat interface:
+  - `rag.generation`, which turns a `PromptContext` into an answer. It is a
+    sibling of `retrieval`, not a stage inside it: it imports `domain` and
+    `config` and nothing else, and `tests/test_architecture.py` enforces that
+    it can reach neither pipeline. The retrieval pipeline still calls no
+    language model and does not know that this package exists.
+  - `BaseChatModel`, two members wide, with two implementations:
+    `OllamaChatModel` for Ollama's native API — preferred for a reasoning
+    model, because reasoning arrives in its own field rather than in `<think>`
+    tags — and `OpenAICompatibleChatModel` for vLLM, LM Studio, llama.cpp,
+    OpenAI, Together, Groq and OpenRouter. Shared HTTP plumbing, including
+    bearer authentication and error mapping, lives in
+    `rag.generation.transport`.
+  - Which service answers is configuration (`RAG_LLM_PROVIDER` and the
+    `RAG_LLM_*` variables), resolved by `rag.generation.providers`. This is
+    the one place constructor injection was not enough: the service that
+    answers is a deployment decision, and requiring a code edit to change it
+    would have made a swappable interface swappable only in principle.
+  - `Answer` and `AnswerDelta` domain contracts, keeping a model's reasoning
+    separate from its answer rather than concatenated into it.
+  - A Chainlit interface in `app/`, outside the package, assembling its own
+    pipeline exactly as the scripts do. It streams the answer, renders each
+    cited passage as an inspectable side element numbered to match the `[n]`
+    markers in the prompt, keeps reasoning in a collapsed step, and refuses to
+    call the model at all when retrieval found nothing. The package stays
+    synchronous: `asyncio.to_thread` bridges the two worlds in the interface
+    alone.
+  - Human feedback: thumbs up/down under every answer, appended by
+    `rag.feedback` to a JSON Lines file with the model, the prompt version,
+    and the provenance of every passage the answer was given. Citations record
+    provenance and never passage text, and the log is gitignored, because it
+    carries text drawn from the document pool.
+  - `scripts/answer.py`, the same loop in the terminal, for seeing what the
+    model was actually sent.
+  - `docs/interface.md`, covering the boundary, provider selection, reasoning,
+    citations, and the feedback format — including a plain statement that vLLM
+    is supported by protocol and has not been run against a live vLLM server.
+
 ### Fixed
+
+- The chat interface raised `AttributeError` from `dataclasses` on startup.
+  Chainlit executes `app/main.py` without registering it in `sys.modules`, and
+  a `@dataclass` there resolves the string annotations produced by
+  `from __future__ import annotations` by looking its defining module up
+  there. An ordinary `import` succeeds where Chainlit fails, so
+  `tests/test_app_module.py` reproduces Chainlit's loader rather than
+  importing the module the usual way.
+
+- The OpenAI-compatible client leaked reasoning into the answer when a
+  `<think>` tag arrived split across two streamed fragments. Text that might
+  still become a tag is now held back until it is resolved, and flushed when
+  the stream ends.
 
 - `scripts/create_schema.py` now reports schema drift. `CREATE TABLE` only
   adds missing tables, so a column added to the models after a database was
@@ -139,6 +190,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scenario.
 
 ### Changed
+
+- `just type-check` and CI now run mypy over `app/` and `scripts/` as well as
+  `src/`. The entry points hold real logic — assembly, streaming, session
+  state — and CI does not install the interface, so this also proves the app
+  type-checks against a bare dependency set.
 
 - `pyproject.toml` now describes this project rather than the upstream
   template: real dependencies, Ruff configured to enforce Google-style

@@ -36,8 +36,12 @@ jobs:
           ruff check .
           ruff format --check .
 
+      # The entry points are checked as well as the package. They hold real
+      # logic — assembly, streaming, session state — and the interface is not
+      # installed here, so this also proves the app type-checks against a
+      # bare dependency set rather than only on a developer's machine.
       - name: Type check (Mypy)
-        run: mypy src/
+        run: mypy src/ app/ scripts/
 
       # Integration tests need a live MariaDB and local model weights, neither
       # of which exists on a runner. They are deselected rather than skipped so

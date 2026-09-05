@@ -23,13 +23,18 @@ PACKAGE_ROOT = Path(rag.__file__).parent
 #: What each package is permitted to import from within this project.
 #: ``domain`` depends on nothing; ``storage`` on the contracts alone; each
 #: pipeline on the shared foundations, and never on the other pipeline.
+#: ``generation`` and ``feedback`` sit above the pipelines and see only the
+#: contracts they are handed, which is why neither appears in any allowance
+#: but its own.
 ALLOWED_IMPORTS = {
     "config": set(),
     "domain": set(),
     "model_assets": set(),
+    "feedback": {"domain"},
     "storage": {"domain", "config"},
     "ingestion": {"domain", "storage", "model_assets", "config"},
     "retrieval": {"domain", "storage", "model_assets", "config"},
+    "generation": {"domain", "config"},
 }
 
 
@@ -110,6 +115,25 @@ def test_the_pipelines_never_import_each_other() -> None:
             )
 
 
+def test_generation_never_imports_a_pipeline() -> None:
+    """Answering sees the contracts, not the machinery that produced them.
+
+    The prompt's boundary between application instructions and untrusted
+    document content is established once, by the prompt augmenter. A model
+    client that could reach into retrieval could rebuild that prompt from
+    parts, moving a security boundary it does not own. Keeping generation
+    blind to both pipelines also means it can be tested against a
+    hand-constructed context, with no database and no models.
+    """
+    for source in _modules_under("generation"):
+        imported = _internal_imports(source)
+        for forbidden in ("retrieval", "ingestion", "storage"):
+            assert forbidden not in imported, (
+                f"{source.relative_to(PACKAGE_ROOT)} imports {forbidden}; "
+                f"generation consumes the domain contracts alone."
+            )
+
+
 def test_domain_contracts_are_free_of_frameworks() -> None:
     """The data contracts depend on no third-party library.
 
@@ -149,7 +173,15 @@ def test_only_storage_imports_sqlalchemy() -> None:
     A processing component that imported SQLAlchemy could reach past the
     repository, and the store would no longer be replaceable.
     """
-    for package in ("domain", "config", "ingestion", "retrieval", "model_assets"):
+    for package in (
+        "domain",
+        "config",
+        "ingestion",
+        "retrieval",
+        "generation",
+        "feedback",
+        "model_assets",
+    ):
         for source in _modules_under(package):
             tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
             for node in ast.walk(tree):
