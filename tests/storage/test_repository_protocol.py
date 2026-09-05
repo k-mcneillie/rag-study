@@ -38,30 +38,21 @@ class InMemoryRepository:
         """
         return any(document.content_hash == content_hash for document in self.documents)
 
-    def save_document(self, document: Document) -> None:
-        """Store a document.
+    def save_ingested_document(
+        self,
+        document: Document,
+        pages: Sequence[Page],
+        embedded_chunks: Sequence[EmbeddedChunk],
+    ) -> None:
+        """Store a document, its pages, and its chunks together.
 
         Args:
             document: The document to store.
+            pages: Its extracted pages.
+            embedded_chunks: Its embedded chunks.
         """
         self.documents.append(document)
-
-    def save_pages(self, pages: Sequence[Page]) -> None:
-        """Store extracted pages.
-
-        Args:
-            pages: The pages to store.
-        """
         self.pages.extend(pages)
-
-    def save_chunks_with_embeddings(
-        self, embedded_chunks: Sequence[EmbeddedChunk]
-    ) -> None:
-        """Store chunks together with their embeddings.
-
-        Args:
-            embedded_chunks: The embedded chunks to store.
-        """
         self.embedded_chunks.extend(embedded_chunks)
 
     def similarity_search(
@@ -133,7 +124,9 @@ def populated_repository() -> InMemoryRepository:
     """
     repository = InMemoryRepository()
     vectors = {"a": (1.0, 0.0, 0.0), "b": (0.9, 0.1, 0.0), "c": (0.0, 1.0, 0.0)}
-    repository.save_chunks_with_embeddings(
+    repository.save_ingested_document(
+        Document(id="doc-1", source_filename="corpus.pdf", content_hash="hash-1"),
+        [],
         [
             EmbeddedChunk(
                 chunk=Chunk(
@@ -143,7 +136,7 @@ def populated_repository() -> InMemoryRepository:
                 model_name="test-model",
             )
             for name, vector in vectors.items()
-        ]
+        ],
     )
     return repository
 

@@ -5,6 +5,7 @@ storage interface with the other pipeline.
 """
 
 from rag.ingestion.chunking.pipeline import ChunkingPipeline
+from rag.ingestion.chunking.semantic import SemanticChunker
 from rag.ingestion.extraction.pdf import PDFExtractor
 from rag.ingestion.interfaces import (
     BaseChunker,
@@ -23,4 +24,5 @@ __all__ = [
     "IngestionOrchestrator",
     "IngestionResult",
     "PDFExtractor",
+    "SemanticChunker",
 ]

@@ -44,32 +44,29 @@ class Repository(Protocol):
         """
         ...
 
-    def save_document(self, document: Document) -> None:
-        """Persist a document record.
+    def save_ingested_document(
+        self,
+        document: Document,
+        pages: Sequence[Page],
+        embedded_chunks: Sequence[EmbeddedChunk],
+    ) -> None:
+        """Persist a document, its pages, and its embedded chunks as one unit.
+
+        This is deliberately a single operation rather than three. An ingested
+        document is only useful complete: a document row without chunks is
+        invisible to retrieval, yet its content hash makes every later attempt
+        look like a duplicate to skip, so a partial write would remove the
+        document from the store permanently and silently. Writing everything
+        in one transaction means the store holds either the whole document or
+        none of it.
+
+        Re-ingesting the same document identifier replaces what is stored, so
+        the operation can be repeated safely after a failure.
 
         Args:
             document: The document to store.
-        """
-        ...
-
-    def save_pages(self, pages: Sequence[Page]) -> None:
-        """Persist extracted pages.
-
-        Args:
-            pages: The pages to store.
-        """
-        ...
-
-    def save_chunks_with_embeddings(
-        self, embedded_chunks: Sequence[EmbeddedChunk]
-    ) -> None:
-        """Persist chunks together with their embeddings.
-
-        Chunks and embeddings are written together so that a chunk can never
-        be left in the store without the vector needed to retrieve it.
-
-        Args:
-            embedded_chunks: The embedded chunks to store.
+            pages: Its extracted pages.
+            embedded_chunks: Its chunks, each with its embedding.
         """
         ...
 

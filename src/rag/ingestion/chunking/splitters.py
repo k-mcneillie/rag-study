@@ -172,6 +172,7 @@ class RecursiveChunker(BaseChunker):
                 text=piece.strip(),
                 section=chunk.section,
                 headers=chunk.headers,
+                ocr_extracted=chunk.ocr_extracted,
                 metadata=dict(chunk.metadata),
             )
             for piece in self._splitter.split_text(chunk.text)
@@ -238,5 +239,5 @@ def build_chunk(page: Page, text: str, headers: Sequence[str]) -> Chunk:
         text=text,
         section=SECTION_SEPARATOR.join(trail) if trail else None,
         headers=trail,
-        metadata={"ocr_extracted": page.ocr_extracted},
+        ocr_extracted=page.ocr_extracted,
     )

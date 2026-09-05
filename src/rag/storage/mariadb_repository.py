@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from sqlalchemy import Select, func, literal, select
+from sqlalchemy import Select, delete, func, insert, literal, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from rag.domain.models import Chunk, Document, EmbeddedChunk, Page, RankedChunk
@@ -66,14 +66,39 @@ class MariaDBRepository:
         with self._session_factory() as session:
             return session.execute(statement.limit(1)).first() is not None
 
-    def save_document(self, document: Document) -> None:
-        """Persist a document record.
+    def save_ingested_document(
+        self,
+        document: Document,
+        pages: Sequence[Page],
+        embedded_chunks: Sequence[EmbeddedChunk],
+    ) -> None:
+        """Persist a document, its pages, and its chunks in one transaction.
+
+        Any earlier copy of the document is deleted first, so re-ingestion
+        replaces rather than accumulates and a retry after a failure starts
+        from a clean state. Foreign keys cascade, so removing the document row
+        removes its pages, chunks, and embeddings with it.
+
+        Rows are inserted in bulk rather than one at a time: a document of a
+        few hundred chunks would otherwise cost a database round trip per
+        chunk, which dominates ingestion time.
 
         Args:
             document: The document to store.
+            pages: Its extracted pages.
+            embedded_chunks: Its chunks, each with its embedding.
+
+        Raises:
+            ValueError: If any vector's width differs from the configured
+                embedding dimension. Checked before the transaction opens, so
+                a bad batch never partially writes.
         """
+        for embedded in embedded_chunks:
+            self._validate_dimension(embedded.vector)
+
         with self._session_factory() as session, session.begin():
-            session.merge(
+            _delete_existing(session, document)
+            session.add(
                 DocumentRow(
                     id=document.id,
                     source_filename=document.source_filename,
@@ -82,68 +107,18 @@ class MariaDBRepository:
                     created_at=document.created_at,
                 )
             )
+            session.flush()
 
-    def save_pages(self, pages: Sequence[Page]) -> None:
-        """Persist extracted pages.
-
-        Args:
-            pages: The pages to store.
-        """
-        if not pages:
-            return
-        with self._session_factory() as session, session.begin():
-            for page in pages:
-                session.merge(
-                    PageRow(
-                        id=page.id,
-                        document_id=page.document_id,
-                        page_number=page.page_number,
-                        text=page.text,
-                        ocr_extracted=page.ocr_extracted,
-                        extra_metadata=dict(page.metadata),
-                    )
+            if pages:
+                session.execute(insert(PageRow), [_page_row(page) for page in pages])
+            if embedded_chunks:
+                session.execute(
+                    insert(ChunkRow),
+                    [_chunk_row(embedded.chunk) for embedded in embedded_chunks],
                 )
-
-    def save_chunks_with_embeddings(
-        self, embedded_chunks: Sequence[EmbeddedChunk]
-    ) -> None:
-        """Persist chunks together with their embeddings in one transaction.
-
-        Args:
-            embedded_chunks: The embedded chunks to store.
-
-        Raises:
-            ValueError: If any vector's width differs from the configured
-                embedding dimension.
-        """
-        if not embedded_chunks:
-            return
-
-        for embedded in embedded_chunks:
-            self._validate_dimension(embedded.vector)
-
-        with self._session_factory() as session, session.begin():
-            for embedded in embedded_chunks:
-                chunk = embedded.chunk
-                session.merge(
-                    ChunkRow(
-                        id=chunk.id,
-                        document_id=chunk.document_id,
-                        page_number=chunk.page_number,
-                        section=chunk.section,
-                        headers=list(chunk.headers),
-                        text=chunk.text,
-                        extra_metadata=dict(chunk.metadata),
-                    )
-                )
-                session.merge(
-                    EmbeddingRow(
-                        id=embedded.id,
-                        chunk_id=chunk.id,
-                        vector=embedded.vector,
-                        model_name=embedded.model_name,
-                        model_dimension=embedded.model_dimension,
-                    )
+                session.execute(
+                    insert(EmbeddingRow),
+                    [_embedding_row(embedded) for embedded in embedded_chunks],
                 )
 
     def similarity_search(
@@ -292,5 +267,115 @@ class MariaDBRepository:
             text=row.text,
             section=row.section,
             headers=tuple(row.headers or ()),
+            ocr_extracted=row.ocr_extracted,
             metadata=dict(row.extra_metadata or {}),
         )
+
+
+def _delete_existing(session: Session, document: Document) -> None:
+    """Remove any stored copy of a document, and everything belonging to it.
+
+    The identifiers are resolved with a query first and then deleted by
+    explicit list, rather than by nesting subqueries inside the deletes.
+    MariaDB restricts selecting from a table that the same statement deletes
+    from, and resolving first sidesteps that entirely while making the
+    intended set obvious.
+
+    Children are removed innermost first rather than by relying on the foreign
+    keys to cascade. The cascade is declared, but depending on it would make
+    correctness here a property of the database's configuration rather than of
+    this code.
+
+    A document already stored under a different identifier but the same
+    content is removed too, so re-ingesting a renamed file replaces it rather
+    than storing it twice.
+
+    Args:
+        session: The open session, inside a transaction.
+        document: The document being written.
+    """
+    document_ids = list(
+        session.scalars(
+            select(DocumentRow.id).where(
+                or_(
+                    DocumentRow.id == document.id,
+                    DocumentRow.content_hash == document.content_hash,
+                )
+            )
+        )
+    )
+    if not document_ids:
+        return
+
+    chunk_ids = list(
+        session.scalars(
+            select(ChunkRow.id).where(ChunkRow.document_id.in_(document_ids))
+        )
+    )
+    if chunk_ids:
+        session.execute(
+            delete(EmbeddingRow).where(EmbeddingRow.chunk_id.in_(chunk_ids))
+        )
+        session.execute(delete(ChunkRow).where(ChunkRow.id.in_(chunk_ids)))
+
+    session.execute(delete(PageRow).where(PageRow.document_id.in_(document_ids)))
+    session.execute(delete(DocumentRow).where(DocumentRow.id.in_(document_ids)))
+    session.flush()
+
+
+def _page_row(page: Page) -> dict[str, object]:
+    """Build the row values for a page.
+
+    Args:
+        page: The page to store.
+
+    Returns:
+        Column values for a bulk insert.
+    """
+    return {
+        "id": page.id,
+        "document_id": page.document_id,
+        "page_number": page.page_number,
+        "text": page.text,
+        "ocr_extracted": page.ocr_extracted,
+        "extra_metadata": dict(page.metadata),
+    }
+
+
+def _chunk_row(chunk: Chunk) -> dict[str, object]:
+    """Build the row values for a chunk.
+
+    Args:
+        chunk: The chunk to store.
+
+    Returns:
+        Column values for a bulk insert.
+    """
+    return {
+        "id": chunk.id,
+        "document_id": chunk.document_id,
+        "page_number": chunk.page_number,
+        "section": chunk.section,
+        "headers": list(chunk.headers),
+        "text": chunk.text,
+        "ocr_extracted": chunk.ocr_extracted,
+        "extra_metadata": dict(chunk.metadata),
+    }
+
+
+def _embedding_row(embedded: EmbeddedChunk) -> dict[str, object]:
+    """Build the row values for an embedding.
+
+    Args:
+        embedded: The embedded chunk to store.
+
+    Returns:
+        Column values for a bulk insert.
+    """
+    return {
+        "id": embedded.id,
+        "chunk_id": embedded.chunk.id,
+        "vector": embedded.vector,
+        "model_name": embedded.model_name,
+        "model_dimension": embedded.model_dimension,
+    }

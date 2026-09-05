@@ -112,6 +112,7 @@ class ChunkRow(Base):
     section: Mapped[str | None] = mapped_column(String(512), nullable=True)
     headers: Mapped[list] = mapped_column(JSON, default=list)
     text: Mapped[str] = mapped_column(Text)
+    ocr_extracted: Mapped[bool] = mapped_column(Boolean, default=False)
     extra_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

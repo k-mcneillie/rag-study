@@ -59,6 +59,51 @@ def _embedded(
     )
 
 
+def test_a_failed_write_leaves_nothing_behind(repository: MariaDBRepository) -> None:
+    """A rejected batch stores no part of the document.
+
+    This is the regression guard for a real defect: writing the document,
+    pages, and chunks in separate transactions left a document row with its
+    content hash but no chunks after a chunk-write failure. That document was
+    invisible to retrieval, while its hash made every retry look like a
+    duplicate to skip, so it was lost permanently and silently.
+
+    Args:
+        repository: Repository bound to the test schema.
+    """
+    document = Document(id="doc-1", source_filename="paper.pdf", content_hash="hash-1")
+    good = _embedded("chunk-1", "doc-1", "body", _vector(1.0))
+    # The second chunk's vector is the wrong width and will be rejected.
+    bad = EmbeddedChunk(
+        chunk=Chunk(id="chunk-2", document_id="doc-1", page_number=1, text="body"),
+        vector=(1.0, 0.0),
+        model_name="test-model",
+    )
+
+    with pytest.raises(ValueError, match="384-dimensional"):
+        repository.save_ingested_document(document, [], [good, bad])
+
+    assert not repository.document_exists("hash-1")
+    assert repository.similarity_search(_vector(1.0), top_k=5) == []
+
+
+def test_reingesting_replaces_rather_than_duplicates(
+    repository: MariaDBRepository,
+) -> None:
+    """Writing the same document twice leaves one copy, not two.
+
+    Args:
+        repository: Repository bound to the test schema.
+    """
+    document = Document(id="doc-1", source_filename="paper.pdf", content_hash="hash-1")
+    chunks = [_embedded("chunk-1", "doc-1", "body text", _vector(1.0))]
+
+    repository.save_ingested_document(document, [], chunks)
+    repository.save_ingested_document(document, [], chunks)
+
+    assert len(repository.similarity_search(_vector(1.0), top_k=10)) == 1
+
+
 def test_document_and_pages_round_trip(repository: MariaDBRepository) -> None:
     """Documents and their pages persist without error.
 
@@ -66,8 +111,8 @@ def test_document_and_pages_round_trip(repository: MariaDBRepository) -> None:
         repository: Repository bound to the test schema.
     """
     document = Document(source_filename="paper.pdf", content_hash="deadbeef")
-    repository.save_document(document)
-    repository.save_pages(
+    repository.save_ingested_document(
+        document,
         [
             Page(document_id=document.id, page_number=1, text="First page."),
             Page(
@@ -76,7 +121,8 @@ def test_document_and_pages_round_trip(repository: MariaDBRepository) -> None:
                 text="Second page.",
                 ocr_extracted=True,
             ),
-        ]
+        ],
+        [],
     )
 
 
@@ -88,14 +134,14 @@ def test_similarity_search_ranks_by_cosine_distance(
     Args:
         repository: Repository bound to the test schema.
     """
-    document = Document(id="doc-1", source_filename="paper.pdf", content_hash="hash")
-    repository.save_document(document)
-    repository.save_chunks_with_embeddings(
+    repository.save_ingested_document(
+        Document(id="doc-1", source_filename="paper.pdf", content_hash="hash"),
+        [],
         [
             _embedded("chunk-near", "doc-1", "closest", _vector(1.0, 0.0)),
             _embedded("chunk-mid", "doc-1", "close", _vector(0.9, 0.1)),
             _embedded("chunk-far", "doc-1", "orthogonal", _vector(0.0, 1.0)),
-        ]
+        ],
     )
 
     results = repository.similarity_search(_vector(1.0, 0.0), top_k=3)
@@ -115,11 +161,10 @@ def test_search_results_carry_full_provenance(repository: MariaDBRepository) -> 
     Args:
         repository: Repository bound to the test schema.
     """
-    repository.save_document(
-        Document(id="doc-1", source_filename="p.pdf", content_hash="h")
-    )
-    repository.save_chunks_with_embeddings(
-        [_embedded("chunk-1", "doc-1", "body text", _vector(1.0))]
+    repository.save_ingested_document(
+        Document(id="doc-1", source_filename="p.pdf", content_hash="h"),
+        [],
+        [_embedded("chunk-1", "doc-1", "body text", _vector(1.0))],
     )
 
     result = repository.similarity_search(_vector(1.0), top_k=1)[0]
@@ -138,17 +183,15 @@ def test_search_can_be_scoped_to_one_document(repository: MariaDBRepository) -> 
     Args:
         repository: Repository bound to the test schema.
     """
-    repository.save_document(
-        Document(id="doc-1", source_filename="a.pdf", content_hash="h1")
+    repository.save_ingested_document(
+        Document(id="doc-1", source_filename="a.pdf", content_hash="h1"),
+        [],
+        [_embedded("chunk-1", "doc-1", "from document one", _vector(1.0))],
     )
-    repository.save_document(
-        Document(id="doc-2", source_filename="b.pdf", content_hash="h2")
-    )
-    repository.save_chunks_with_embeddings(
-        [
-            _embedded("chunk-1", "doc-1", "from document one", _vector(1.0)),
-            _embedded("chunk-2", "doc-2", "from document two", _vector(1.0)),
-        ]
+    repository.save_ingested_document(
+        Document(id="doc-2", source_filename="b.pdf", content_hash="h2"),
+        [],
+        [_embedded("chunk-2", "doc-2", "from document two", _vector(1.0))],
     )
 
     results = repository.similarity_search(
@@ -165,11 +208,10 @@ def test_malicious_text_is_stored_as_data(repository: MariaDBRepository) -> None
         repository: Repository bound to the test schema.
     """
     payload = "' OR '1'='1'; DROP TABLE chunks; --"
-    repository.save_document(
-        Document(id="doc-1", source_filename=payload, content_hash="h")
-    )
-    repository.save_chunks_with_embeddings(
-        [_embedded("chunk-1", "doc-1", payload, _vector(1.0))]
+    repository.save_ingested_document(
+        Document(id="doc-1", source_filename=payload, content_hash="h"),
+        [],
+        [_embedded("chunk-1", "doc-1", payload, _vector(1.0))],
     )
 
     results = repository.similarity_search(_vector(1.0), top_k=1)
@@ -185,11 +227,10 @@ def test_injection_in_a_filter_value_matches_nothing(
     Args:
         repository: Repository bound to the test schema.
     """
-    repository.save_document(
-        Document(id="doc-1", source_filename="a.pdf", content_hash="h")
-    )
-    repository.save_chunks_with_embeddings(
-        [_embedded("chunk-1", "doc-1", "body", _vector(1.0))]
+    repository.save_ingested_document(
+        Document(id="doc-1", source_filename="a.pdf", content_hash="h"),
+        [],
+        [_embedded("chunk-1", "doc-1", "body", _vector(1.0))],
     )
 
     results = repository.similarity_search(
@@ -239,13 +280,11 @@ def test_wrong_dimension_embedding_is_rejected(repository: MariaDBRepository) ->
     Args:
         repository: Repository bound to the test schema.
     """
-    repository.save_document(
-        Document(id="doc-1", source_filename="a.pdf", content_hash="h")
-    )
-
     with pytest.raises(ValueError, match="384-dimensional"):
-        repository.save_chunks_with_embeddings(
-            [_embedded("chunk-1", "doc-1", "body", (1.0, 0.0))]
+        repository.save_ingested_document(
+            Document(id="doc-1", source_filename="a.pdf", content_hash="h"),
+            [],
+            [_embedded("chunk-1", "doc-1", "body", (1.0, 0.0))],
         )
 
 
@@ -257,8 +296,10 @@ def test_duplicate_documents_are_detectable(repository: MariaDBRepository) -> No
     """
     assert not repository.document_exists("deadbeef")
 
-    repository.save_document(
-        Document(id="doc-1", source_filename="paper.pdf", content_hash="deadbeef")
+    repository.save_ingested_document(
+        Document(id="doc-1", source_filename="paper.pdf", content_hash="deadbeef"),
+        [],
+        [],
     )
 
     assert repository.document_exists("deadbeef")
@@ -271,5 +312,6 @@ def test_empty_writes_are_no_ops(repository: MariaDBRepository) -> None:
     Args:
         repository: Repository bound to the test schema.
     """
-    repository.save_pages([])
-    repository.save_chunks_with_embeddings([])
+    repository.save_ingested_document(
+        Document(id="doc-empty", source_filename="e.pdf", content_hash="h-e"), [], []
+    )

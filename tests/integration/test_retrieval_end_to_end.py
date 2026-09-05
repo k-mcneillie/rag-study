@@ -78,10 +78,9 @@ def populated_repository(
         session_factory,
         embedding_dimension=integration_settings.embedding_dimension,
     )
-    repository.save_document(
-        Document(id="doc-1", source_filename="corpus.pdf", content_hash="hash-1")
-    )
-    repository.save_chunks_with_embeddings(
+    repository.save_ingested_document(
+        Document(id="doc-1", source_filename="corpus.pdf", content_hash="hash-1"),
+        [],
         [
             EmbeddedChunk(
                 chunk=Chunk(
@@ -95,7 +94,7 @@ def populated_repository(
                 model_name="all-MiniLM-L6-v2",
             )
             for index, (name, text) in enumerate(PASSAGES.items())
-        ]
+        ],
     )
     return repository
 
