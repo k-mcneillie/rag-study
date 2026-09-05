@@ -25,12 +25,25 @@ Documents go in; ranked, cited context comes out.
                                                         │
                                                         ▼
                                             context + provenance
+                                                        ╎
+                                            ╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌ the contract
+                                                        ▼
+                                                    generation
+                                                        │
+                                                        ▼
+                                             answer, cited, rated
 ```
 
-It stops at assembled context. **No language model is called**, by design: a
-package that both retrieves and generates is harder to test, and the boundary
-between untrusted document text and application instructions is cleaner when
-the consumer is a separate system.
+**The retrieval pipeline stops at assembled context and calls no language
+model.** That has not changed. What sits below the dashed line is
+`rag.generation`, a sibling package that consumes the `PromptContext` contract
+from outside: retrieval cannot import it, does not know it exists, and is still
+tested without it. The separation is what keeps the boundary between untrusted
+document text and application instructions in one auditable place — the prompt
+is built once, by the augmenter, and sent verbatim.
+
+A chat interface over that pipeline lives in `app/`, outside the package
+entirely. See [interface.md](interface.md).
 
 **Everything runs offline.** Model weights are local files, fetched once at
 setup. No component reaches the network at run time — verified by running the
@@ -46,10 +59,15 @@ Roughly 4,200 lines of source across four packages plus three leaf modules.
 src/rag/
 ├── config.py          settings from the environment; plain data, no frameworks
 ├── model_assets.py    the one audited way to load a local model
-├── domain/            the contracts every component speaks        (284 lines)
-├── storage/           the only place SQLAlchemy appears           (875 lines)
-├── ingestion/         documents → stored, embedded chunks       (1,778 lines)
-└── retrieval/         a query → context with provenance           (805 lines)
+├── feedback.py        human ratings, appended to a JSON Lines file
+├── domain/            the contracts every component speaks
+├── storage/           the only place SQLAlchemy appears
+├── ingestion/         documents → stored, embedded chunks
+├── retrieval/         a query → context with provenance
+└── generation/        context → an answer, from a swappable service
+
+app/                   the Chainlit chat interface, outside the package
+scripts/               ingest, query, answer: one entry point each
 ```
 
 ### The dependency rule
@@ -61,6 +79,9 @@ src/rag/
                     ▲
         ┌───────────┴───────────┐
     ingestion                retrieval        never each other
+                                 ╎
+                             generation       domain and config only;
+                                              never any pipeline
 ```
 
 **Ingestion and retrieval never import one another.** They meet only at the

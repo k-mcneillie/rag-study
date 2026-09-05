@@ -1,9 +1,10 @@
 # rag-study
 
 A simple, modular, offline-capable Retrieval-Augmented Generation package.
-Documents go in; ranked, cited context comes out. It runs with **no internet
-connection**: model weights are local files, and nothing is downloaded while
-the system is running.
+Documents go in; ranked, cited context comes out — and, through a chat
+interface that sits outside the package, an answer with its sources. It runs
+with **no internet connection**: model weights are local files, and nothing is
+downloaded while the system is running.
 
 ---
 
@@ -59,6 +60,10 @@ cp .env.example .env
 
 Edit `.env` and set `RAG_DB_PASSWORD` to the password you just chose. **Never
 commit `.env`** — it is gitignored, and it should stay that way.
+
+The `RAG_LLM_*` variables are optional: they configure the model that answers,
+and retrieval works without any of them. Set them when you get to
+[answering](#get-an-answer-not-just-context).
 
 ## 4. Fetch the model weights
 
@@ -135,15 +140,46 @@ python scripts/query.py "..." --top-k 3 --show-prompt --document-id <id>
 ```text
 prompt: retrieval_context v1   reranker: cross-encoder
 
-[1] score=4.094 (initial 0.629)  page 2  ... > 1 Introduction
-    Figure 1: DPO optimizes for human preferences while avoiding ...
+[1] score=4.094 (initial 0.629)  page 2  2 Method > 2.1 Objective
+    <the opening of the matching passage, from your own documents>
 ```
 
 Both scores are shown: what the vector search thought, and what the reranker
 thought. `--show-prompt` prints the full assembled prompt.
 
-**No language model is called.** The package stops at assembled context. What
-you do with it is the next system's job.
+**The retrieval pipeline calls no language model.** It stops at assembled
+context. Answering is a separate package on the far side of that contract.
+
+## Get an answer, not just context
+
+```bash
+pip install -e ".[ui]"     # the chat interface; not needed to retrieve
+just ui                    # http://localhost:8000
+just ask "How does DPO avoid training a reward model?"    # no browser
+```
+
+The interface streams the answer, shows the passages it cited, keeps the
+model's reasoning in a collapsed step, and offers thumbs up/down under each
+answer. Ratings are appended to `results/feedback.jsonl` with the passages the
+answer was given.
+
+The model is a service, reached over HTTP and chosen by configuration:
+
+```bash
+RAG_LLM_PROVIDER=ollama                     # or vllm, or openai
+RAG_LLM_BASE_URL=http://localhost:11434     # vLLM and OpenAI want the /v1 root
+RAG_LLM_MODEL=deepseek-r1:14b
+RAG_LLM_API_KEY=                            # only for a service that needs one
+```
+
+`openai` covers anything speaking the OpenAI chat completions API — LM Studio,
+llama.cpp, OpenAI, Together, Groq, OpenRouter. Pointing at a different service
+is an environment change, not a code change; adding one it cannot yet speak to
+is a `BaseChatModel` and one line in `rag.generation.providers`.
+
+The model is never downloaded — it must already exist on that service — and no
+answer leaves the machine when the service is local. See
+[docs/interface.md](docs/interface.md).
 
 ## Run the tests
 
@@ -227,6 +263,7 @@ it in; nothing else changes:
 | Reranking | `BaseReranker` | `RetrievalOrchestrator(reranker=...)` |
 | Prompt assembly | `BasePromptAugmenter` | `RetrievalOrchestrator(prompt_augmenter=...)` |
 | Database | `Repository` protocol | either orchestrator |
+| Answering model | `BaseChatModel` | one line in `rag.generation.providers` |
 
 ## Prompt versioning and injection
 
@@ -254,12 +291,18 @@ to be a different source.
 | `error in your SQL syntax ... VECTOR` | MariaDB older than 11.7 |
 | Integration tests skipped | No database or weights present; the unit suite still runs |
 | Ingestion reports `0 chunks` | Scanned PDF with no text layer — OCR needs Tesseract installed |
+| `Cannot reach the model service at ...` | The service is not running, or `RAG_LLM_BASE_URL` is wrong |
+| `Model ... is not available at ...` | Not provisioned on that service. It is never pulled for you (`ollama pull <model>`) |
+| `... rejected the credential (HTTP 401)` | `RAG_LLM_API_KEY` is missing or wrong for a service that requires one |
+| `Unknown model provider '...'` | `RAG_LLM_PROVIDER` must be `ollama`, `vllm` or `openai` |
+| `ModuleNotFoundError: chainlit` | The interface is an optional extra: `pip install -e ".[ui]"` |
 
 ---
 
 # Further reading
 
 - [docs/system-overview.md](docs/system-overview.md) — how every part fits together
+- [docs/interface.md](docs/interface.md) — the answering layer, the chat UI, and feedback
 - [docs/architecture.md](docs/architecture.md) — design decisions, threat model, open questions
 - [docs/future-work.md](docs/future-work.md) — what is deliberately not built yet
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branch strategy and QA requirements

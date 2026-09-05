@@ -16,6 +16,13 @@ Ordered by the value it would add.
 Retrieval quality is currently assessed by reading results. That is enough to
 catch something obviously wrong — an "Author Contributions" section ranked
 above a paper's method — but not enough to answer whether a change helped.
+
+The chat interface now collects thumbs up and down against real questions,
+recording the passages each answer was given
+([interface.md](interface.md)). That is not a substitute for this item — a
+rating judges an answer, not a ranking, and the sample is whatever happened to
+be asked — but it is where the questions for a harness will come from, and it
+costs nothing to accumulate in the meantime.
 The cross-encoder reranker is the clearest example: it removes obvious noise,
 yet on some academic queries it ranks a genuinely answering passage lower than
 vector similarity did. Without measurement there is no way to settle that.
@@ -122,11 +129,20 @@ Small, understood, and each with a cost that has not yet justified fixing:
 
 Worth stating, so that absence reads as a decision rather than an omission:
 
-- **An LLM endpoint inside this package.** It stops at assembled context. A
-  package that both retrieves and generates is harder to test, and the prompt
-  boundary is cleaner when the consumer is separate.
-- **A plugin registry or factory layer.** Constructor injection has been
-  sufficient at every point. Adding indirection before it is needed would cost
-  the readability the package is built around.
+- **Generation inside the retrieval pipeline.** This position has been tested
+  by building the thing it was about, and it held. `rag.generation` answers
+  from a `PromptContext`, but it is a sibling of `retrieval`, not a stage
+  inside it: it imports `domain` and `config` and nothing else, and
+  `tests/test_architecture.py` enforces that. Retrieval still stops at
+  assembled context and still does not know that a model exists. What changed
+  is only that something now stands on the far side of the contract. See
+  [interface.md](interface.md).
+- **A plugin registry or factory layer.** Constructor injection is still how
+  components are wired, with one deliberate exception:
+  `rag.generation.providers` maps a configured name to a model client. Which
+  model service answers is a deployment decision, so requiring a code edit to
+  change it would have made the swappable interface swappable only in
+  principle. It is a dictionary and a lookup — not a registry, not discovery,
+  and it exists for one kind of component.
 - **Async.** Ingestion is throughput-bound on model inference, not on waiting.
   Async would add colour to every function signature for no measured gain.

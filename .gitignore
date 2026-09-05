@@ -61,6 +61,16 @@ Thumbs.db
 docs/pool
 
 # ==========================================
+# 💬 Interface & Human Feedback
+# ==========================================
+# Feedback records carry question and answer text drawn from the document
+# pool, so the log stays out of version control exactly as the pool does.
+results/feedback*.jsonl
+# Chainlit's local element store and generated translation files.
+.files/
+.chainlit/translations/
+
+# ==========================================
 # 🤖 Local Model Assets
 # ==========================================
 # Model weights are provisioned locally, never committed and never downloaded

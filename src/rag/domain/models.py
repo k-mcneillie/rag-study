@@ -243,9 +243,9 @@ class PromptMetadata:
 class PromptContext:
     """The final retrieval output: top-k context plus its provenance.
 
-    This is the hand-off point to a future LLM. The retrieved text it carries
-    is untrusted document content and must never be treated as instructions
-    by whatever consumes it.
+    This is the hand-off point to a language model. The retrieved text it
+    carries is untrusted document content and must never be treated as
+    instructions by whatever consumes it.
 
     Attributes:
         chunks: The reranked chunks included in the context, in order.
@@ -256,4 +256,48 @@ class PromptContext:
 
     chunks: tuple[RerankedChunk, ...]
     rendered_text: str
+    prompt_metadata: PromptMetadata
+
+
+@dataclass(frozen=True)
+class AnswerDelta:
+    """One fragment of a streamed answer.
+
+    A generator yields these as they arrive so that a caller can display
+    partial output. Reasoning is carried separately rather than concatenated
+    into the answer, because a caller will usually want to present the two
+    differently, and only the answer is the result.
+
+    Attributes:
+        text: The fragment's text.
+        reasoning: Whether this fragment belongs to the model's reasoning
+            rather than to its answer.
+    """
+
+    text: str
+    reasoning: bool = False
+
+
+@dataclass(frozen=True)
+class Answer:
+    """A completed answer, with the identity of what produced it.
+
+    The far side of the hand-off that :class:`PromptContext` begins. The text
+    is model output derived from untrusted document content: it is data to be
+    displayed, never markup or instructions to be acted on.
+
+    Attributes:
+        text: The answer itself.
+        reasoning: The model's reasoning, empty when none was produced or
+            when reasoning was not requested.
+        model_name: Identity of the model that produced the answer, recorded
+            so that a result can be attributed to the model that gave it.
+        prompt_metadata: Which prompt template produced the context the model
+            was given, carried through so that an answer, its prompt, and its
+            passages can be reproduced together.
+    """
+
+    text: str
+    reasoning: str
+    model_name: str
     prompt_metadata: PromptMetadata
