@@ -249,6 +249,22 @@ def test_wrong_dimension_embedding_is_rejected(repository: MariaDBRepository) ->
         )
 
 
+def test_duplicate_documents_are_detectable(repository: MariaDBRepository) -> None:
+    """A stored document can be recognised again by its content hash.
+
+    Args:
+        repository: Repository bound to the test schema.
+    """
+    assert not repository.document_exists("deadbeef")
+
+    repository.save_document(
+        Document(id="doc-1", source_filename="paper.pdf", content_hash="deadbeef")
+    )
+
+    assert repository.document_exists("deadbeef")
+    assert not repository.document_exists("other-hash")
+
+
 def test_empty_writes_are_no_ops(repository: MariaDBRepository) -> None:
     """Saving nothing is harmless and touches no transaction.
 

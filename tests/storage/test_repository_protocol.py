@@ -27,6 +27,17 @@ class InMemoryRepository:
         self.pages: list[Page] = []
         self.embedded_chunks: list[EmbeddedChunk] = []
 
+    def document_exists(self, content_hash: str) -> bool:
+        """Report whether a document with this content is already stored.
+
+        Args:
+            content_hash: Digest to look up.
+
+        Returns:
+            Whether a matching document is stored.
+        """
+        return any(document.content_hash == content_hash for document in self.documents)
+
     def save_document(self, document: Document) -> None:
         """Store a document.
 

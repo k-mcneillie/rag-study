@@ -94,6 +94,23 @@ class Page:
 
 
 @dataclass(frozen=True)
+class ExtractedDocument:
+    """The complete result of extracting one source document.
+
+    An extractor produces both the document record and its pages: it is the
+    component that reads the file, so it is the only one positioned to derive
+    the content hash and the document's own metadata.
+
+    Attributes:
+        document: The document record.
+        pages: The extracted pages, in source order.
+    """
+
+    document: Document
+    pages: tuple[Page, ...]
+
+
+@dataclass(frozen=True)
 class Chunk:
     """A retrievable unit of text produced by a chunker.
 

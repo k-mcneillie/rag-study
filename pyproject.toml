@@ -79,6 +79,11 @@ warn_unused_ignores = true
 no_implicit_optional = true
 strict_equality = true
 
+[[tool.mypy.overrides]]
+# These ship no type information of their own.
+module = ["pymupdf4llm.*", "sentence_transformers.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 88
 target-version = "py312"

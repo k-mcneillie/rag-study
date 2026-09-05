@@ -33,6 +33,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     satisfiable without a database, and live MariaDB integration tests
     including SQL-injection and resource-limit cases.
 
+- Phase 3 ingestion pipeline:
+  - `PDFExtractor`, using `pymupdf4llm` for layout-aware extraction, so
+    two-column papers, templated journal articles, and tables come back in
+    reading order. Its layout models ship inside the package, so extraction
+    needs no network. PDFs are validated by signature rather than extension,
+    with size and page-count limits, and a malformed document fails alone.
+  - Text cleaning built on `ftfy` for encoding repair, plus removal of page
+    furniture through three complementary rules: structural (bare page
+    numbers, folios, publisher stamps), repetition-based with digit masking
+    (running heads that carry a page number), and a short list of known
+    artefacts.
+  - `MarkdownHeaderChunker` and `RecursiveChunker`, thin adapters over
+    `langchain_text_splitters`, returning domain chunks that carry their own
+    page and section provenance. Heading trails survive page breaks,
+    including the ancestors of a subsection that starts a new page.
+  - `ChunkingPipeline`, which chunks by structure then by size and removes
+    contamination measured in the real corpus: reference lists, figure and
+    chart label text, and fragments.
+  - `LocalSentenceTransformerEmbedder`, loading weights only from a local
+    directory with remote code refused, failing loudly rather than falling
+    back to a download.
+  - `IngestionOrchestrator`, holding workflow only, which reports per-document
+    failures instead of raising so one bad file cannot end a batch, and skips
+    documents whose content has already been ingested.
+
 ### Changed
 
 - `pyproject.toml` now describes this project rather than the upstream
@@ -43,6 +68,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `vector` is a reserved word in MariaDB 11.7+ that SQLAlchemy's MySQL dialect
   does not quote automatically. `docs/architecture.md` records the change.
 - `.gitignore` excludes local model assets under `models/`.
+- `Repository` gained `document_exists`, so ingestion can skip content it has
+  already stored. The corpus contained a byte-identical duplicate pair, which
+  would otherwise have appeared twice in every result set.
+- `BaseExtractor` returns an `ExtractedDocument` rather than a bare list of
+  pages: the extractor reads the file, so it is the only component positioned
+  to derive the content hash and the document's metadata.
 
 ### Removed
 

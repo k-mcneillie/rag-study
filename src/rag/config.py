@@ -164,6 +164,12 @@ class Settings:
             Must match the ``VECTOR`` column width in the database schema.
         max_top_k: Upper bound on the number of results a retrieval request
             may ask for, bounding the cost of any single query.
+        embedding_batch_size: How many chunks are encoded at once, bounding
+            peak memory when embedding a large document.
+        max_document_bytes: Largest source document that will be opened.
+        max_document_pages: Most pages extracted from one document.
+        chunk_size: Target maximum chunk size, in characters.
+        chunk_overlap: Characters shared between adjacent chunks.
     """
 
     database: DatabaseSettings
@@ -171,6 +177,11 @@ class Settings:
     embedding_model_name: str
     embedding_dimension: int
     max_top_k: int = 100
+    embedding_batch_size: int = 32
+    max_document_bytes: int = 100 * 1024 * 1024
+    max_document_pages: int = 2000
+    chunk_size: int = 1200
+    chunk_overlap: int = 150
 
     @classmethod
     def from_env(
@@ -194,6 +205,13 @@ class Settings:
             embedding_model_name=_require(env, "EMBEDDING_MODEL_NAME"),
             embedding_dimension=_optional_int(env, "EMBEDDING_DIMENSION", 384),
             max_top_k=_optional_int(env, "MAX_TOP_K", 100),
+            embedding_batch_size=_optional_int(env, "EMBEDDING_BATCH_SIZE", 32),
+            max_document_bytes=_optional_int(
+                env, "MAX_DOCUMENT_BYTES", 100 * 1024 * 1024
+            ),
+            max_document_pages=_optional_int(env, "MAX_DOCUMENT_PAGES", 2000),
+            chunk_size=_optional_int(env, "CHUNK_SIZE", 1200),
+            chunk_overlap=_optional_int(env, "CHUNK_OVERLAP", 150),
         )
 
 
