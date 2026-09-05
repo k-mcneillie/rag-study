@@ -82,7 +82,9 @@ def build_orchestrator(settings: Settings) -> RetrievalOrchestrator:
         ),
         ranker=CosineSimilarityRanker(repository),
         reranker=build_reranker(settings),
-        prompt_augmenter=TemplatePromptAugmenter(),
+        prompt_augmenter=TemplatePromptAugmenter(
+            prompt_name=settings.prompt_name, prompt_version=settings.prompt_version
+        ),
         max_top_k=settings.max_top_k,
     )
 

@@ -54,6 +54,20 @@ def _require(env: Mapping[str, str], name: str) -> str:
     return value
 
 
+def _optional_str(env: Mapping[str, str], name: str, default: str) -> str:
+    """Read an optional string environment variable.
+
+    Args:
+        env: Mapping of environment variable names to values.
+        name: Variable name to read, without the ``RAG_`` prefix.
+        default: Value to use when the variable is absent.
+
+    Returns:
+        The value, or ``default`` if the variable is unset or blank.
+    """
+    return env.get(f"{ENV_PREFIX}{name}", "").strip() or default
+
+
 def _optional_path(env: Mapping[str, str], name: str) -> Path | None:
     """Read an optional filesystem path from the environment.
 
@@ -163,6 +177,10 @@ class Settings:
         reranker_model_path: Local directory holding the cross-encoder used
             for reranking, or ``None`` to keep the initial ranking.
         reranker_batch_size: How many query/passage pairs are scored at once.
+        prompt_name: Logical name of the prompt template to render.
+        prompt_version: Version of that template. Changing the prompt in use
+            is a configuration change, not a code change, so that a result can
+            be reproduced by restoring the configuration that produced it.
         max_document_bytes: Largest source document that will be opened.
         max_document_pages: Most pages extracted from one document.
         chunk_size: Target maximum chunk size, in characters.
@@ -177,6 +195,8 @@ class Settings:
     embedding_batch_size: int = 32
     reranker_model_path: Path | None = None
     reranker_batch_size: int = 16
+    prompt_name: str = "retrieval_context"
+    prompt_version: str = "v1"
     max_document_bytes: int = 100 * 1024 * 1024
     max_document_pages: int = 2000
     chunk_size: int = 1200
@@ -207,6 +227,8 @@ class Settings:
             embedding_batch_size=_optional_int(env, "EMBEDDING_BATCH_SIZE", 32),
             reranker_model_path=_optional_path(env, "RERANKER_MODEL_PATH"),
             reranker_batch_size=_optional_int(env, "RERANKER_BATCH_SIZE", 16),
+            prompt_name=_optional_str(env, "PROMPT_NAME", "retrieval_context"),
+            prompt_version=_optional_str(env, "PROMPT_VERSION", "v1"),
             max_document_bytes=_optional_int(
                 env, "MAX_DOCUMENT_BYTES", 100 * 1024 * 1024
             ),

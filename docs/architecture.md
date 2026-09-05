@@ -1,9 +1,14 @@
-# Architecture — Phase 1
+# Architecture
 
-This document is the Phase 1 ("Architecture") deliverable for the RAG
-package: package structure, domain contracts, interfaces, dependency graph,
-database schema, and dependency plan. No implementation code is written in
-this phase — that begins in Phase 2 ("Foundation").
+Written as the Phase 1 design deliverable and kept current as the package was
+built: package structure, domain contracts, interfaces, dependency graph,
+database schema, threat model, and the open questions, with the ones since
+resolved marked as such. Where implementation contradicted the design, the
+design was corrected here rather than left to drift.
+
+The dependency rules described below are enforced by
+`tests/test_architecture.py`, which parses the source, so this document and
+the code cannot silently diverge on the point that matters most.
 
 ## 1. Philosophy and priority order
 
@@ -432,7 +437,8 @@ infrastructure. One row per component:
 | Prompt augmentation | RerankedChunk list (i.e. retrieved document content) | **untrusted** | prompt injection / indirect prompt injection embedded in document text | template keeps a hard structural separation between application instructions and retrieved content; retrieved text is never concatenated into an "instructions" section; no string-matching "injection filter" is relied on as the actual defense |
 | Configuration | env vars / `.env` | trusted (operator-controlled) | secrets committed to source control | `.env.example` with placeholders only, real `.env` gitignored |
 | Logging | pipeline internals | n/a | leaking full document text, retrieved context, or credentials into logs | log identifiers/sizes/durations, not full content or connection strings |
-| Model loading | local file path | trusted (operator-provisioned assets) | loading an unexpected/untrusted model path | path comes only from configuration, not from any request-time input; offline mode set explicitly; fail closed if missing |
+| Model loading | local file path | trusted (operator-provisioned assets) | loading an unexpected/untrusted model path | path comes only from configuration, not from any request-time input; offline mode set explicitly; fail closed if missing; safetensors only, never pickle |
+| Dependencies | third-party packages | trusted once pinned | supply-chain compromise, unmaintained transitive packages | minimal, maintained, version-constrained dependencies; no runtime downloads, so a compromised registry cannot reach a running system |
 
 The most important structural point carried through from the domain model
 in §4: **a chunk's provenance and control metadata (id, ranking score,

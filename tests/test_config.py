@@ -69,3 +69,25 @@ def test_test_database_key_can_be_targeted() -> None:
     settings = Settings.from_env(env, database_key="TEST_DB_NAME")
 
     assert settings.database.database == "rag_study_test"
+
+
+def test_prompt_version_is_configuration_not_code() -> None:
+    """Changing the prompt in use does not require editing the package.
+
+    The specification forbids hard-coding prompt versions, so that a past
+    result can be reproduced by restoring the configuration that produced it.
+    """
+    settings = Settings.from_env({**VALID_ENV, "RAG_PROMPT_VERSION": "v2"})
+
+    assert settings.prompt_version == "v2"
+    assert settings.prompt_name == "retrieval_context"
+
+
+def test_prompt_identity_falls_back_to_the_shipped_default() -> None:
+    """An unconfigured deployment still renders a known prompt."""
+    settings = Settings.from_env(VALID_ENV)
+
+    assert (settings.prompt_name, settings.prompt_version) == (
+        "retrieval_context",
+        "v1",
+    )

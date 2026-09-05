@@ -100,6 +100,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     means the stage is skipped; a path that is set but unloadable is an
     error, so a misconfiguration is never mistaken for a deliberate choice.
 
+- Prompt name and version are now configuration (`RAG_PROMPT_NAME`,
+  `RAG_PROMPT_VERSION`) rather than constructor defaults, so changing the
+  prompt in use is not a code change and a past result can be reproduced by
+  restoring the configuration that produced it.
+
 ### Changed
 
 - `pyproject.toml` now describes this project rather than the upstream
