@@ -96,19 +96,33 @@ imports upward.
 ## 3. Dependency graph
 
 ```text
-                 domain
-                (no deps)
+            config      domain      model_assets
+          (no internal dependencies; leaves)
                     ▲
                     │
                  storage
-          (depends on: domain)
+       (depends on: domain, config)
                     ▲
         ┌───────────┴───────────┐
         │                       │
     ingestion                retrieval
 (depends on: domain,     (depends on: domain,
- storage)                 storage)
+ storage, config,         storage, config,
+ model_assets)            model_assets)
 ```
+
+**Phase 4 addition — `model_assets`.** Both pipelines load a model from disk:
+ingestion embeds chunks, retrieval embeds queries. The rules for doing that
+safely (directory must exist, no network, no remote code execution) are
+identical, and duplicating them would mean two copies of a security-critical
+routine that must be kept in agreement. `rag/model_assets.py` holds that one
+implementation. It is infrastructure for a model asset in the same way
+`storage` is infrastructure for a database: a leaf module that neither
+pipeline owns, and through which neither can reach the other.
+
+These rules are enforced by `tests/test_architecture.py`, which parses the
+source rather than trusting review — it is what caught `storage` reaching into
+`config` and `config` importing SQLAlchemy.
 
 Rules enforced by this graph and checked in CI/lint (an import-linter or
 equivalent rule belongs in Phase 2, not this doc):

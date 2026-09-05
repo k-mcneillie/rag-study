@@ -61,6 +61,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     failures instead of raising so one bad file cannot end a batch, and skips
     documents whose content has already been ingested.
 
+- Phase 4 retrieval pipeline:
+  - `CosineSimilarityRanker`, which delegates the comparison to MariaDB's
+    vector index so only the top-k rows return to the application, behind an
+    interface that keeps the choice replaceable.
+  - `PassthroughReranker`, a real stage that preserves the ranker's ordering,
+    so the pipeline is already shaped for the cross-encoder that will replace
+    it.
+  - `TemplatePromptAugmenter` with file-based prompt versioning. Retrieved
+    text is placed inside marked source material the template describes as
+    untrusted data, and markers occurring in retrieved content or in the query
+    are neutralised so a document cannot forge the boundary and pose as the
+    application. Templates resolve by identifier against the package's own
+    directory, never by a caller-supplied path.
+  - `LocalSentenceTransformerQueryEmbedder`, behind a `BaseQueryEmbedder`
+    declared in the retrieval package so that retrieval never imports
+    ingestion.
+  - `RetrievalOrchestrator`, holding workflow only, which retrieves more
+    candidates than it returns so a reranker has room to work, and bounds
+    both `top_k` and the widened candidate pool.
+  - `rag.model_assets`, one audited implementation of local model loading
+    shared by both pipelines.
+  - `tests/test_architecture.py`, which parses the source to enforce the
+    dependency rules — that the pipelines never import each other, that the
+    domain stays framework-free, and that only storage imports SQLAlchemy.
+
 ### Changed
 
 - `pyproject.toml` now describes this project rather than the upstream
@@ -74,6 +99,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Repository` gained `document_exists`, so ingestion can skip content it has
   already stored. The corpus contained a byte-identical duplicate pair, which
   would otherwise have appeared twice in every result set.
+- Connection URL construction moved from `DatabaseSettings` into
+  `rag.storage.engine`, so configuration is plain data with no SQLAlchemy
+  dependency. The architecture tests caught the leak.
 - `BaseExtractor` returns an `ExtractedDocument` rather than a bare list of
   pages: the extractor reads the file, so it is the only component positioned
   to derive the content hash and the document's metadata.

@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
-from sqlalchemy import URL
 
 #: Prefix applied to every environment variable this package reads.
 ENV_PREFIX = "RAG_"
@@ -100,27 +99,6 @@ class DatabaseSettings:
     user: str
     password: str = field(repr=False)
     database: str
-
-    @property
-    def url(self) -> URL:
-        """Build the SQLAlchemy connection URL.
-
-        ``URL.create`` escapes credentials correctly, so passwords containing
-        reserved characters cannot corrupt the URL. The returned object masks
-        the password in its own ``repr``.
-
-        Returns:
-            A SQLAlchemy URL for the configured MariaDB database.
-        """
-        return URL.create(
-            drivername="mysql+pymysql",
-            username=self.user,
-            password=self.password,
-            host=self.host,
-            port=self.port,
-            database=self.database,
-            query={"charset": "utf8mb4"},
-        )
 
     @classmethod
     def from_env(

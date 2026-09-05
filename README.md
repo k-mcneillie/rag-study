@@ -27,10 +27,10 @@ other**. They are separate subpackages that never import one another, sharing
 only data contracts and storage.
 
 ```
-                 domain          (data contracts, no dependencies)
+     config      domain      model_assets    (leaves: no internal deps)
                     ▲
                     │
-                 storage         (SQLAlchemy + MariaDB)
+                 storage                     (SQLAlchemy + MariaDB)
                     ▲
         ┌───────────┴───────────┐
         │                       │
@@ -43,7 +43,12 @@ only data contracts and storage.
 Top-k context + metadata`
 
 Deleting either pipeline directory leaves the other working. `storage` is
-infrastructure beneath both, not part of either.
+infrastructure beneath both, not part of either, as are `config` and
+`model_assets`.
+
+This is not just a convention: `tests/test_architecture.py` parses the source
+and fails if a pipeline imports the other, if the domain gains a framework
+dependency, or if anything outside `storage` imports SQLAlchemy.
 
 The full design — domain contracts, interface responsibilities, database
 schema, threat model, and open questions — is in
@@ -74,7 +79,9 @@ src/rag/
     └── orchestrator.py         # workflow only
 ```
 
-`retrieval/` arrives in Phase 4.
+Plus `retrieval/` (ranker, reranker, prompt augmenter, orchestrator) and
+`model_assets.py`, the single audited implementation of local model loading
+that both pipelines share.
 
 ## Running ingestion
 
@@ -116,6 +123,69 @@ Failures are reported per document rather than raised, so one unreadable file
 cannot end a run. Documents whose content has already been ingested are
 skipped.
 
+## Running retrieval
+
+```python
+from rag.config import load_settings
+from rag.retrieval import (
+    CosineSimilarityRanker,
+    PassthroughReranker,
+    RetrievalOrchestrator,
+    TemplatePromptAugmenter,
+)
+from rag.retrieval.embedding.local import LocalSentenceTransformerQueryEmbedder
+from rag.storage import MariaDBRepository, build_engine, build_session_factory
+
+settings = load_settings()
+repository = MariaDBRepository(
+    build_session_factory(build_engine(settings.database)),
+    embedding_dimension=settings.embedding_dimension,
+)
+
+orchestrator = RetrievalOrchestrator(
+    query_embedder=LocalSentenceTransformerQueryEmbedder(settings.embedding_model_path),
+    ranker=CosineSimilarityRanker(repository),
+    reranker=PassthroughReranker(),
+    prompt_augmenter=TemplatePromptAugmenter(),
+    max_top_k=settings.max_top_k,
+)
+
+context = orchestrator.retrieve("How does DPO avoid a reward model?", top_k=3)
+print(context.rendered_text)
+for chunk in context.chunks:
+    print(chunk.rerank_score, chunk.chunk.page_number, chunk.chunk.section)
+```
+
+Queries must be embedded by the same model that embedded the chunks, or the
+vectors occupy different spaces; the configured model path keeps them in step.
+There is no LLM call — retrieval returns the assembled context and stops.
+
+## Prompt versioning
+
+Templates live in `src/rag/retrieval/prompts/` as `<name>_<version>.txt`, and
+every `PromptContext` records the `prompt_name` and `prompt_version` that
+produced it, so a result can always be traced to the exact prompt that built
+it. To add a version, drop in `retrieval_context_v2.txt` and pass
+`TemplatePromptAugmenter(prompt_version="v2")` — no retrieval logic changes.
+
+Templates resolve by identifier against the package's own directory. A caller
+cannot supply a path, so prompt selection can never become a way to read an
+arbitrary file.
+
+## Prompt injection
+
+A PDF can contain a sentence addressed to a language model, and it reaches the
+prompt looking like any other passage. The defence is structural, not a filter:
+retrieved text is placed inside marked source material that the template
+describes as untrusted data to be quoted rather than obeyed. A filter can be
+rephrased around; a boundary holds regardless of wording.
+
+The boundary itself is defended too — marker-like sequences in retrieved text
+*or in the query* are neutralised, so nothing can appear to close the quoted
+region and continue as application instructions. Citations are rendered from
+the pipeline's own provenance, so a document claiming to be a different source
+cannot forge one.
+
 ## What ingestion cleans, and why
 
 Extraction is layout-aware, so two-column papers, templated journal articles,
@@ -145,6 +215,9 @@ writing a class and passing it in — no other stage changes:
 | Document format | `BaseExtractor` | `IngestionOrchestrator(extractor=...)` |
 | Chunking strategy | `BaseChunker` | `IngestionOrchestrator(chunker=...)` |
 | Embedding model | `BaseEmbedder` | `IngestionOrchestrator(embedder=...)` |
+| Ranking strategy | `BaseRanker` | `RetrievalOrchestrator(ranker=...)` |
+| Reranking strategy | `BaseReranker` | `RetrievalOrchestrator(reranker=...)` |
+| Prompt assembly | `BasePromptAugmenter` | `RetrievalOrchestrator(prompt_augmenter=...)` |
 | Database | the `Repository` protocol | either orchestrator |
 
 A `DocxExtractor` or `LatexExtractor` needs only to return an

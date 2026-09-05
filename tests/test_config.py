@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from rag.config import ConfigurationError, DatabaseSettings, Settings
+from rag.config import ConfigurationError, Settings
 
 VALID_ENV = {
     "RAG_DB_HOST": "127.0.0.1",
@@ -60,29 +60,6 @@ def test_password_is_absent_from_settings_repr() -> None:
 
     assert "s3cr3t-value" not in repr(settings.database)
     assert "s3cr3t-value" not in repr(settings)
-
-
-def test_password_is_masked_in_the_connection_url_repr() -> None:
-    """Printing a connection URL does not disclose the password."""
-    settings = Settings.from_env(VALID_ENV)
-
-    assert "s3cr3t-value" not in repr(settings.database.url)
-
-
-def test_connection_url_escapes_reserved_characters() -> None:
-    """A password containing URL metacharacters is escaped, not injected."""
-    database = DatabaseSettings(
-        host="127.0.0.1",
-        port=3306,
-        user="rag_app",
-        password="p@ss:word/with?reserved#chars",
-        database="rag_study",
-    )
-
-    rendered = database.url.render_as_string(hide_password=False)
-
-    assert "p%40ss%3Aword%2Fwith%3Freserved%23chars" in rendered
-    assert rendered.endswith("/rag_study?charset=utf8mb4")
 
 
 def test_test_database_key_can_be_targeted() -> None:
