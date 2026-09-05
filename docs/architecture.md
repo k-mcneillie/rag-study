@@ -306,14 +306,19 @@ chunks
 embeddings
   id              CHAR(36) PK
   chunk_id        CHAR(36) FK -> chunks.id
-  vector          VECTOR(384)        -- dimension matches model_dim below
+  embedding       VECTOR(384)        -- dimension matches model_dimension below
   model_name      VARCHAR(255)       -- e.g. "all-MiniLM-L6-v2"
-  model_dim       INT                -- e.g. 384; guards against silent mismatch
+  model_dimension INT                -- e.g. 384; guards against silent mismatch
   created_at      DATETIME
-  VECTOR INDEX (vector)
+  VECTOR INDEX ix_embeddings_embedding (embedding) DISTANCE=cosine
 ```
 
 Notes:
+
+- The vector column is named `embedding`, not `vector`: `vector` is a reserved
+  word in MariaDB 11.7+, and SQLAlchemy's MySQL dialect does not yet quote it
+  automatically. The ORM attribute is still `vector`; only the column name
+  differs. This was found during Phase 2 implementation.
 
 - `384` matches the default `all-MiniLM-L6-v2` model chosen for this phase,
   but is a config value, not a hard-coded assumption baked into the schema
@@ -423,12 +428,11 @@ not a runtime check.
 Flagged rather than silently decided, per the instruction to surface
 architectural ambiguities before implementation:
 
-1. **MariaDB version.** This schema assumes MariaDB 11.7+ for native
-   `VECTOR` support, per the decision made for this phase. Confirm the
-   actual installed server version before Phase 2; if it's older, swap
-   `embeddings.vector` to `BLOB` and have `CosineSimilarityRanker` compute
-   similarity in Python/numpy over vectors returned by the repository — no
-   other component changes.
+1. ~~**MariaDB version.**~~ **Resolved in Phase 2.** The installed server is
+   MariaDB 12.3.3, so native `VECTOR`, `VEC_DISTANCE_COSINE`, and
+   `VECTOR INDEX ... DISTANCE=cosine` are all available and verified working.
+   The BLOB + numpy fallback is not needed; if a future deployment targets an
+   older server, only the column type and the ranker implementation change.
 2. **Initial `BaseReranker` implementation.** The spec allows a literal
    no-op (pass the ranked list through unchanged) as an acceptable Phase 4
    starting point. Recommended: implement it as an explicit
