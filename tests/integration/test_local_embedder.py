@@ -143,5 +143,5 @@ def test_a_file_is_not_mistaken_for_a_model(tmp_path: Path) -> None:
     impostor = tmp_path / "model"
     impostor.write_text("not a model", encoding="utf-8")
 
-    with pytest.raises(ModelUnavailableError, match="No embedding model at"):
+    with pytest.raises(ModelUnavailableError, match="No model at"):
         LocalSentenceTransformerEmbedder(impostor)
