@@ -22,6 +22,7 @@ pip-delete-this-directory.txt
 .mypy_cache/
 .ruff_cache/
 .coverage
+coverage.xml
 htmlcov/
 dist/
 build/
@@ -57,3 +58,11 @@ data/processed/
 .idea/
 .DS_Store
 Thumbs.db
+docs/pool
+
+# ==========================================
+# 🤖 Local Model Assets
+# ==========================================
+# Model weights are provisioned locally, never committed and never downloaded
+# at runtime. See README "Local model assets".
+models/
