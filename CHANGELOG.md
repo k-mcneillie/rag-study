@@ -171,6 +171,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `ftfy` and `langchain-text-splitters` were imported by `rag.ingestion` but
+  never declared in `[project] dependencies`. They were present in the
+  development Conda environment, so the omission was invisible locally while
+  a clean install of the package — including CI's `pip install .[dev]` —
+  lacked both. Mypy reported them as missing imports and, with `ftfy`
+  unresolved, `repair_text` as returning `Any`; at run time the ingestion
+  pipeline would have failed at import. Both are now declared.
+
 - The chat interface raised `AttributeError` from `dataclasses` on startup.
   Chainlit executes `app/main.py` without registering it in `sys.modules`, and
   a `@dataclass` there resolves the string annotations produced by
