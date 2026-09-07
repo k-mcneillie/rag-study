@@ -169,6 +169,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are excluded, because they deliberately contain dummy credentials used to
   prove real ones never escape. The scan is clean at the time of writing.
 
+- `Settings.semantic_chunking` (`RAG_SEMANTIC_CHUNKING`), wiring the
+  already-built `SemanticChunker` into `scripts/ingest.py`. It had a full
+  implementation and test suite but no way to enable it; the flag reuses the
+  same embedder instance already loaded for the pipeline's own embedding
+  step, so turning it on costs no second model load. Off by default.
+
 ### Fixed
 
 - `ftfy` and `langchain-text-splitters` were imported by `rag.ingestion` but
@@ -222,6 +228,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `save_ingested_document`, with a regression test reproducing the original
   scenario.
 
+- **`scripts/create_schema.py` could create a schema with the wrong vector
+  width.** The `VECTOR` column's width is fixed in `rag.storage.orm` at
+  class-definition time, but `Settings.embedding_dimension` is read from the
+  environment at run time, and nothing compared the two before creating
+  tables. Swapping to a differently-sized embedding model and setting
+  `RAG_EMBEDDING_DIMENSION` accordingly would create the schema at the old
+  width, surfacing later as an unrelated-looking dimension-mismatch failure
+  during ingestion or retrieval. The script now checks the two agree before
+  creating anything, and fails loudly, naming which constant to edit, if they
+  do not.
+
 ### Changed
 
 - `just type-check` and CI now run mypy over `app/` and `scripts/` as well as
@@ -259,7 +276,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   letting them skip silently, and checks the architecture rules as their own
   step so a dependency violation is reported on its own terms.
 
+- `build_reranker`, `build_orchestrator`, and `build_chat_model` were
+  duplicated verbatim across `scripts/query.py`, `scripts/answer.py`, and
+  `app/main.py`. They now live once in `rag.assembly` — a leaf module that
+  depends on `retrieval`, `storage`, and `generation` but never on
+  `ingestion`, so the pipeline boundary is unaffected — and each entry point
+  imports them instead. `rag.storage.MariaDBRepository`'s constructor
+  argument is unchanged; only where the composition code lives has moved.
+
 ### Removed
+
+- The `numpy` dependency, declared for "the application-side ranking
+  fallback" but never imported anywhere in `src/`: ranking has always run
+  database-side via `VEC_DISTANCE_COSINE`, and the fallback it named was
+  never built. Removing it shrinks the install and offline-provisioning
+  surface with no capability lost; it can be re-added if that fallback is
+  ever built.
 
 - Template scaffolding that did not apply to this project: the `src/package`
   placeholder, the `sesh` and `torch` dependencies, the placeholder baseline
