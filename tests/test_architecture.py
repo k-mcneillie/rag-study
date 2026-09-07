@@ -35,6 +35,14 @@ ALLOWED_IMPORTS = {
     "ingestion": {"domain", "storage", "model_assets", "config"},
     "retrieval": {"domain", "storage", "model_assets", "config"},
     "generation": {"domain", "config"},
+    "assembly": {
+        "domain",
+        "config",
+        "storage",
+        "retrieval",
+        "generation",
+        "model_assets",
+    },
 }
 
 
@@ -181,6 +189,7 @@ def test_only_storage_imports_sqlalchemy() -> None:
         "generation",
         "feedback",
         "model_assets",
+        "assembly",
     ):
         for source in _modules_under(package):
             tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))

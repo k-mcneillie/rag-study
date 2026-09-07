@@ -41,5 +41,5 @@ def test_the_app_executes_outside_sys_modules() -> None:
 
     spec.loader.exec_module(module)
 
-    assert callable(module.build_orchestrator)
+    assert callable(module.build_retrieval_orchestrator)
     assert callable(module.build_chat_model)
