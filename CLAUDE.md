@@ -7,10 +7,13 @@ context to reason from.
 ## What this is
 
 A modular, offline-capable RAG package: PDFs in, ranked and cited context out.
-It deliberately stops before calling a language model.
+The retrieval pipeline deliberately stops before calling a language model;
+`rag.generation` is a separate sibling package that answers from that context,
+and a Chainlit interface over both lives in `app/`, outside the package.
 
-Start with [docs/system-overview.md](docs/system-overview.md) for how the parts
-fit together, [docs/architecture.md](docs/architecture.md) for why, and
+Start with [docs/architecture.md](docs/architecture.md) for how the parts fit
+together and why, [docs/ingestion.md](docs/ingestion.md) and
+[docs/retrieval.md](docs/retrieval.md) for the pipelines, and
 [docs/future-work.md](docs/future-work.md) for what is deliberately absent.
 
 ## Environment

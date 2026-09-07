@@ -241,6 +241,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Documentation was reviewed against the implementation and reconstructed into
+  a single authoritative set: `docs/architecture.md` (rewritten to describe the
+  current system, dropping the phase-by-phase design-log framing), and new
+  `docs/ingestion.md`, `docs/retrieval.md`, `docs/generation.md`,
+  `docs/security.md`, `docs/database-cheatsheet.md`,
+  `docs/model-deployment-cheatsheet.md`, and `docs/codebase-cheatsheet.md`.
+  `docs/future-work.md` was trimmed. The README was rewritten and shortened.
+  `docs/security.md` tags every mitigation as implemented, a design assumption,
+  a known limitation, or future work, and corrects several claims the code did
+  not back up (a storage-root confinement check, a per-document chunk-count
+  cap, load-time safetensors enforcement, and `HF_HUB_OFFLINE` being set by the
+  application — none of which exist).
+- The `.github/` issue and pull-request templates were replaced. They were
+  unadapted upstream boilerplate for a numerical-computing project; the new
+  templates match this project, and the PR template's checklist now includes
+  `just check-all` and a `CHANGELOG.md` entry. The misnamed `ISSUE_TEMPLATES/`
+  directory was renamed to GitHub's expected `ISSUE_TEMPLATE/`.
+
 - `just type-check` and CI now run mypy over `app/` and `scripts/` as well as
   `src/`. The entry points hold real logic — assembly, streaming, session
   state — and CI does not install the interface, so this also proves the app
@@ -296,3 +314,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Template scaffolding that did not apply to this project: the `src/package`
   placeholder, the `sesh` and `torch` dependencies, the placeholder baseline
   tests, and `example.environment.yml`.
+
+- `docs/system-overview.md` and `docs/interface.md`. The first duplicated the
+  README and `docs/architecture.md`; its weaknesses list and test taxonomy
+  moved into `docs/architecture.md`. The second became `docs/generation.md`.
+  The untracked draft `docs/evaluation-plan.md` was removed; its approach is
+  summarised in `docs/future-work.md` §1.

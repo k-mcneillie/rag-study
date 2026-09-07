@@ -1,44 +1,76 @@
 # rag-study
 
-A simple, modular, offline-capable Retrieval-Augmented Generation package.
-Documents go in; ranked, cited context comes out — and, through a chat
-interface that sits outside the package, an answer with its sources. It runs
-with **no internet connection**: model weights are local files, and nothing is
-downloaded while the system is running.
+A modular, offline-capable Retrieval-Augmented Generation package. Documents go
+in; ranked, cited context comes out. It runs with no internet connection: model
+weights are local files, and nothing is downloaded while the system is running.
 
----
+The package stops at assembled context. Answering is a separate sibling package,
+`rag.generation`, and a chat interface over both lives in `app/`, outside the
+package.
 
-# Quick start
+## What it solves
 
-Five steps from a clean checkout to a working query. Each one is checkable, so
-if something goes wrong you will know which step it was.
+Turning a corpus of PDFs into context a language model can answer from,
+reliably and reproducibly, without trusting the documents. Retrieved text is
+treated as untrusted data throughout: it cannot change a ranking, forge a
+citation, or become an instruction. Every result records the prompt version
+that produced it.
 
-## 1. Create the environment
+## Architecture
+
+Two independent pipelines share only the domain contracts and the storage
+interface. Neither imports the other; either could be deleted and the other
+would still work. `tests/test_architecture.py` parses the source and fails the
+build if that stops being true.
+
+```text
+        config      domain      model_assets      leaves: no internal dependencies
+                       ▲
+                    storage                       SQLAlchemy + MariaDB
+                       ▲
+           ┌───────────┴───────────┐
+       ingestion                retrieval          never each other
+                                    ╎
+                                generation         domain and config only
+```
+
+**Ingestion:** `source → extract → clean → chunk → embed → store`
+
+**Retrieval:** `query → embed → rank → rerank → assemble context`
+
+Design priorities, in order when contested: simplicity, modularity,
+independence, maintainability, correctness, testability, extensibility,
+performance. Every abstraction is a real replacement point; nothing is built
+for a need that does not yet exist.
+
+## Main technologies
+
+MariaDB 11.7+ (native `VECTOR` column and cosine vector index), SQLAlchemy,
+PyMySQL, `sentence-transformers` for local embedding and cross-encoder models,
+`pymupdf` / `pymupdf4llm` for layout-aware PDF extraction, `langchain-text-splitters`
+and `ftfy` behind the project's own interfaces, `httpx` for the answering
+service, and Chainlit for the optional interface.
+
+## Quick start
+
+Five steps from a clean checkout to a working query. Each is checkable.
+
+### 1. Create the environment
 
 ```bash
 conda env create -f environment.yml
 conda activate rag-study-py3.12
-```
-
-Check it worked:
-
-```bash
 python -c "import rag; print(rag.__version__)"    # 0.1.0
 ```
 
-## 2. Start MariaDB and create the databases
+### 2. Start MariaDB and create the databases
 
-Requires **MariaDB 11.7 or later** — earlier versions have no `VECTOR` type.
-Verified against 12.3.3.
+Requires **MariaDB 11.7 or later**. Verified against 12.3.3.
 
 ```bash
-brew services start mariadb          # macOS; use your platform's equivalent
+brew services start mariadb          # or your platform's equivalent
 mariadb -e "SELECT VERSION();"       # must be >= 11.7
 ```
-
-Create the databases and a **least-privilege application user**. The
-application needs only to read and write rows; it is deliberately not allowed
-to change the schema, so a bug or an injected statement cannot alter it:
 
 ```sql
 CREATE DATABASE rag_study      CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -46,42 +78,38 @@ CREATE DATABASE rag_study_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE USER 'rag_app'@'localhost' IDENTIFIED BY 'choose-a-strong-password';
 GRANT SELECT, INSERT, UPDATE, DELETE ON rag_study.* TO 'rag_app'@'localhost';
-
--- The test database is disposable; the suite creates and drops its own tables.
 GRANT ALL PRIVILEGES ON rag_study_test.* TO 'rag_app'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
-## 3. Configure
+The application user holds no DDL rights by design. Schema creation is a
+separate, privileged step. See
+[docs/database-cheatsheet.md](docs/database-cheatsheet.md).
+
+### 3. Configure
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and set `RAG_DB_PASSWORD` to the password you just chose. **Never
-commit `.env`** — it is gitignored, and it should stay that way.
+Set `RAG_DB_PASSWORD` to the password chosen above. The `RAG_LLM_*` variables
+are optional and configure the answering model; retrieval works without them.
+Never commit `.env` — it is gitignored.
 
-The `RAG_LLM_*` variables are optional: they configure the model that answers,
-and retrieval works without any of them. Set them when you get to
-[answering](#get-an-answer-not-just-context).
+### 4. Fetch the model weights
 
-## 4. Fetch the model weights
-
-This is the **only step that needs the internet**, and it happens now, not at
-run time. Both models are downloaded as `safetensors`, never as pickle files.
+The only step that needs the internet, and it happens now, not at run time.
+Both models are fetched as `safetensors`.
 
 ```bash
 python - <<'PY'
 from huggingface_hub import snapshot_download
 
-# Embedding model: turns text into vectors. Required.
 snapshot_download(
     "sentence-transformers/all-MiniLM-L6-v2",
     local_dir="models/embeddings/all-MiniLM-L6-v2",
     allow_patterns=["*.json", "vocab.txt", "model.safetensors", "1_Pooling/*"],
 )
-
-# Reranker: reorders results. Optional but recommended.
 snapshot_download(
     "cross-encoder/ms-marco-MiniLM-L-6-v2",
     local_dir="models/rerankers/ms-marco-MiniLM-L-6-v2",
@@ -90,7 +118,7 @@ snapshot_download(
 PY
 ```
 
-Check it worked — this must print `384`, matching the database column width:
+Check it — this must print `384`, matching the database column width:
 
 ```bash
 python -c "
@@ -99,71 +127,51 @@ from rag.ingestion.embedding.local import LocalSentenceTransformerEmbedder
 print(LocalSentenceTransformerEmbedder(Path('models/embeddings/all-MiniLM-L6-v2')).dimension)"
 ```
 
-## 5. Create the schema
-
-The application user cannot do this, by design, so use an administrative
-account:
+### 5. Create the schema
 
 ```bash
 RAG_ADMIN_DB_URL='mysql+pymysql://root@localhost/rag_study?unix_socket=/tmp/mysql.sock' \
     python scripts/create_schema.py
 ```
 
-Expected output: `Schema created. Tables: chunks, documents, embeddings, pages`
+Expected: `Schema present. Tables: chunks, documents, embeddings, pages`
 
----
+## Usage
 
-# Using it
-
-## Ingest documents
+### Ingest documents
 
 ```bash
-python scripts/ingest.py path/to/your/pdfs
+python scripts/ingest.py path/to/pdfs
 ```
 
 ```text
 Ingested 4 documents (487 chunks), skipped 1 duplicates, 0 failed.
 ```
 
-One unreadable file cannot stop a run — failures are reported per document.
-Documents whose content has already been stored are skipped, so re-running is
-safe. A document is written in a single transaction: either all of it is
-stored, or none of it is.
+One unreadable file cannot stop a run; failures are reported per document.
+Content already stored is skipped, so re-running is safe. A document is written
+in a single transaction. Discovery is non-recursive and lowercase `.pdf` only.
 
-## Ask a question
+### Retrieve context
 
 ```bash
 python scripts/query.py "How does DPO avoid training a reward model?"
-python scripts/query.py "..." --top-k 3 --show-prompt --document-id <id>
+python scripts/query.py "..." --top-k 3 --document-id <id> --show-prompt
 ```
 
-```text
-prompt: retrieval_context v1   reranker: cross-encoder
+Both scores are shown — what the vector search thought, and what the reranker
+thought. **The retrieval pipeline calls no language model.** It stops at
+assembled context.
 
-[1] score=4.094 (initial 0.629)  page 2  2 Method > 2.1 Objective
-    <the opening of the matching passage, from your own documents>
-```
-
-Both scores are shown: what the vector search thought, and what the reranker
-thought. `--show-prompt` prints the full assembled prompt.
-
-**The retrieval pipeline calls no language model.** It stops at assembled
-context. Answering is a separate package on the far side of that contract.
-
-## Get an answer, not just context
+### Get an answer
 
 ```bash
-pip install -e ".[ui]"     # the chat interface; not needed to retrieve
-just ui                    # http://localhost:8000
+pip install -e ".[ui]"                       # the chat interface; not needed to retrieve
+just ui                                      # http://localhost:8000
 just ask "How does DPO avoid training a reward model?"    # no browser
 ```
 
-The interface streams the answer, shows the passages it cited, keeps the
-model's reasoning in a collapsed step, and offers thumbs up/down under each
-answer. Ratings are appended to `results/feedback.jsonl` with the passages the
-answer was given.
-
-The model is a service, reached over HTTP and chosen by configuration:
+The model is a service reached over HTTP and chosen by configuration:
 
 ```bash
 RAG_LLM_PROVIDER=ollama                     # or vllm, or openai
@@ -172,137 +180,84 @@ RAG_LLM_MODEL=deepseek-r1:14b
 RAG_LLM_API_KEY=                            # only for a service that needs one
 ```
 
-`openai` covers anything speaking the OpenAI chat completions API — LM Studio,
-llama.cpp, OpenAI, Together, Groq, OpenRouter. Pointing at a different service
-is an environment change, not a code change; adding one it cannot yet speak to
-is a `BaseChatModel` and one line in `rag.generation.providers`.
+`openai` covers anything speaking the OpenAI chat-completions API. The model is
+never downloaded — it must already exist on that service. See
+[docs/generation.md](docs/generation.md).
 
-The model is never downloaded — it must already exist on that service — and no
-answer leaves the machine when the service is local. See
-[docs/interface.md](docs/interface.md).
+## Configuration
 
-## Run the tests
+Every recognised variable is in [`.env.example`](.env.example), with prose. The
+ones a first deployment sets:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `RAG_DB_HOST` / `RAG_DB_USER` / `RAG_DB_PASSWORD` / `RAG_DB_NAME` | — | database connection (required) |
+| `RAG_EMBEDDING_MODEL_PATH` / `RAG_EMBEDDING_MODEL_NAME` | — | the local embedding model (required) |
+| `RAG_RERANKER_MODEL_PATH` | unset | cross-encoder directory; unset keeps the vector ranking |
+| `RAG_TOP_K` / `RAG_MAX_TOP_K` | 5 / 100 | passages returned by default, and the ceiling |
+| `RAG_PROMPT_NAME` / `RAG_PROMPT_VERSION` | `retrieval_context` / `v1` | which prompt template renders context |
+| `RAG_SEMANTIC_CHUNKING` | `false` | split oversized sections at topic boundaries (costs an extra embedding pass) |
+| `RAG_LLM_*` | see `.env.example` | the optional answering service |
+
+## Offline operation
+
+No component reaches the network at run time. Model weights are local files,
+fetched once at setup (step 4). Model loading passes `local_files_only=True`
+and refuses remote code. The guarantee is verified by running the suite with
+the network disabled:
 
 ```bash
-just check-all                 # lint, format, types, tests — the full gate
-pytest -m "not integration"    # no database or model weights needed
+HF_HUB_OFFLINE=1 pytest
 ```
 
----
+## Model requirements
 
-# How it works
+An embedding model (required) and a cross-encoder re-ranker (optional), both
+`sentence-transformers` models held in local directories. Defaults are
+`all-MiniLM-L6-v2` (384 dimensions) and `cross-encoder/ms-marco-MiniLM-L-6-v2`.
+See [docs/model-deployment-cheatsheet.md](docs/model-deployment-cheatsheet.md).
 
-## Two independent pipelines
+## Database requirements
 
-Ingestion and retrieval **never import each other**. They share only data
-contracts and storage:
+MariaDB 11.7 or later, for the native `VECTOR` type and vector index.
+Similarity runs in the database via `VEC_DISTANCE_COSINE`. The application user
+is least-privilege and holds no DDL rights; schema creation uses a separate
+administrative account. See
+[docs/database-cheatsheet.md](docs/database-cheatsheet.md).
 
-```text
-     config      domain      model_assets     (leaves: no internal deps)
-                    ▲
-                 storage                      (SQLAlchemy + MariaDB)
-                    ▲
-        ┌───────────┴───────────┐
-    ingestion                retrieval
+## Testing
+
+```bash
+just check-all                 # ruff, bandit, mypy, pytest — the full gate
+pytest -m "not integration"    # no database or model weights required
+HF_HUB_OFFLINE=1 pytest        # proves nothing reaches the network
 ```
 
-**Ingestion:** `PDF → extract → clean → chunk → embed → store`
+Integration tests need MariaDB running and the model weights present; they skip
+rather than fail when either is missing.
 
-**Retrieval:** `query → embed → rank → rerank → assemble context`
+## Security
 
-This is enforced, not merely intended: `tests/test_architecture.py` parses the
-source and fails if a pipeline imports the other, if the domain gains a
-framework dependency, or if anything outside `storage` imports SQLAlchemy.
+Retrieved content and metadata are untrusted throughout. The instruction/data
+boundary in the prompt is structural, not a keyword filter. Provenance and
+scores are pipeline-set on frozen dataclasses and cannot be written from
+document content. SQL is built from bound parameters only, with an allow-list
+for filterable fields. The application database user holds DML rights only.
+Model loading is local-only with remote code refused. The full model — what is
+implemented, what is assumed, and what is not — is in
+[docs/security.md](docs/security.md).
 
-## What the pipeline cleans, and why
+## Documentation
 
-Extraction is layout-aware, so two-column papers, journal templates and tables
-come back in reading order. Beyond that, each of these was measured in a real
-corpus before any code was written for it:
-
-| Contaminant | Why it matters | Handling |
-|---|---|---|
-| Running heads, page numbers | Repeat on every page, crowding results | Three rules at page edges |
-| Chart and axis label text | Fragments that match numbers but answer nothing | Figure text blocks discarded |
-| Reference lists | Match on wording, answer nothing | Dropped (`drop_references=False` keeps them) |
-| Duplicate documents | Fill top-k with the same passage | Skipped by content hash |
-| Fragments | Bare headings displace real passages | Minimum chunk length |
-
-Repeated sentences *inside* a page are deliberately kept: scientific writing
-restates things legitimately, and removing them would destroy content.
-
-## Chunking strategies
-
-| Chunker | Cuts at | Use when |
-|---|---|---|
-| `MarkdownHeaderChunker` | Headings | You want section provenance (default) |
-| `RecursiveChunker` | Character budget | You only need size control |
-| `SemanticChunker` | Where the subject changes | Long discursive prose |
-
-Semantic chunking is opt-in because it embeds every sentence:
-
-```python
-from rag.ingestion import ChunkingPipeline, SemanticChunker
-from rag.ingestion.embedding.local import LocalSentenceTransformerEmbedder
-
-embedder = LocalSentenceTransformerEmbedder(settings.embedding_model_path)
-chunker = ChunkingPipeline(semantic_chunker=SemanticChunker(embedder))
-```
-
-## Replacing any component
-
-Every stage is constructor-injected behind an interface. Write a class, pass
-it in; nothing else changes:
-
-| To replace | Subclass | Pass to |
-|---|---|---|
-| Document format | `BaseExtractor` | `IngestionOrchestrator(extractor=...)` |
-| Chunking | `BaseChunker` | `IngestionOrchestrator(chunker=...)` |
-| Embedding model | `BaseEmbedder` | `IngestionOrchestrator(embedder=...)` |
-| Ranking | `BaseRanker` | `RetrievalOrchestrator(ranker=...)` |
-| Reranking | `BaseReranker` | `RetrievalOrchestrator(reranker=...)` |
-| Prompt assembly | `BasePromptAugmenter` | `RetrievalOrchestrator(prompt_augmenter=...)` |
-| Database | `Repository` protocol | either orchestrator |
-| Answering model | `BaseChatModel` | one line in `rag.generation.providers` |
-
-## Prompt versioning and injection
-
-Templates live in `src/rag/retrieval/prompts/` as `<name>_<version>.txt`.
-Every result records the prompt that produced it, and the version is
-configuration (`RAG_PROMPT_VERSION`), so a past result can be reproduced by
-restoring the configuration that produced it.
-
-Retrieved text is placed inside marked source material that the template
-describes as untrusted data to be quoted, never obeyed. This is structural,
-not a keyword filter — a filter can be rephrased around, a boundary cannot.
-Marker forgeries in retrieved text *or in the query* are neutralised, and
-citations come from the pipeline's own provenance, so a document cannot claim
-to be a different source.
-
----
-
-# Troubleshooting
-
-| Symptom | Cause and fix |
+| Document | Contents |
 |---|---|
-| `Required environment variable RAG_DB_... is not set` | `.env` missing or incomplete — see step 3 |
-| `No model at models/embeddings/...` | Weights not fetched — see step 4. It will never download them for you |
-| `CREATE command denied to user 'rag_app'` | Working as intended: run step 5 as an admin |
-| `error in your SQL syntax ... VECTOR` | MariaDB older than 11.7 |
-| Integration tests skipped | No database or weights present; the unit suite still runs |
-| Ingestion reports `0 chunks` | Scanned PDF with no text layer — OCR needs Tesseract installed |
-| `Cannot reach the model service at ...` | The service is not running, or `RAG_LLM_BASE_URL` is wrong |
-| `Model ... is not available at ...` | Not provisioned on that service. It is never pulled for you (`ollama pull <model>`) |
-| `... rejected the credential (HTTP 401)` | `RAG_LLM_API_KEY` is missing or wrong for a service that requires one |
-| `Unknown model provider '...'` | `RAG_LLM_PROVIDER` must be `ollama`, `vllm` or `openai` |
-| `ModuleNotFoundError: chainlit` | The interface is an optional extra: `pip install -e ".[ui]"` |
-
----
-
-# Further reading
-
-- [docs/system-overview.md](docs/system-overview.md) — how every part fits together
-- [docs/interface.md](docs/interface.md) — the answering layer, the chat UI, and feedback
-- [docs/architecture.md](docs/architecture.md) — design decisions, threat model, open questions
-- [docs/future-work.md](docs/future-work.md) — what is deliberately not built yet
-- [CONTRIBUTING.md](CONTRIBUTING.md) — branch strategy and QA requirements
+| [docs/architecture.md](docs/architecture.md) | boundaries, contracts, dependency rules, weaknesses |
+| [docs/ingestion.md](docs/ingestion.md) | the ingestion pipeline, stage by stage |
+| [docs/retrieval.md](docs/retrieval.md) | the retrieval pipeline, and prompt versioning |
+| [docs/generation.md](docs/generation.md) | `rag.generation`, the chat interface, feedback |
+| [docs/security.md](docs/security.md) | the security model and its mitigations |
+| [docs/database-cheatsheet.md](docs/database-cheatsheet.md) | operating MariaDB for this project |
+| [docs/model-deployment-cheatsheet.md](docs/model-deployment-cheatsheet.md) | provisioning local model assets |
+| [docs/codebase-cheatsheet.md](docs/codebase-cheatsheet.md) | repository map and extension points |
+| [docs/future-work.md](docs/future-work.md) | what is deliberately not built yet |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | branch strategy and QA requirements |

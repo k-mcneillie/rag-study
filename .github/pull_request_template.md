@@ -1,24 +1,26 @@
----
-name: Research & Code Contribution
-about: Propose algorithmic updates, data pipeline changes, or bug fixes.
----
+### Summary
 
-### Summary of Changes
-Provide a brief overview of the updates. What computational problem, mathematical optimization, or data processing bug does this PR address?
+What changed and why. Link the issue it addresses, if any.
 
-### Scientific & Algorithmic Impact
-* **Mathematical/Methodological Changes:** (e.g., modified the objective function, updated the matrix transformation logic, fixed a normalization bug)
-* **Performance Impact:** (e.g., reduced memory footprint, altered execution runtime complexity from $O(N^2)$ to $O(N \log N)$)
+### Scope
 
-### Validation & Reproducibility
-How did you verify that these changes are numerically accurate and scientifically sound?
-- [ ] **Unit Tests:** Added/updated `pytest` files to catch regressions.
-- [ ] **Deterministic Verification:** Tested with a fixed random seed to ensure consistent outputs.
-- [ ] **Data Check:** Verified that output shapes, tensor dimensions, or statistical properties match expected targets.
+- [ ] Ingestion
+- [ ] Retrieval
+- [ ] Generation
+- [ ] Storage
+- [ ] Configuration / operations
+- [ ] Documentation only
 
-### Related Issues / Literature
-* Fixes # (Link the relevant issue tracker number if applicable)
-* Baseline Reference: (Link or mention any paper, DOI, or notebook used to validate this logic)
+### Checklist
 
-### Diagnostic Plots / Artifacts (Optional)
-*(If this PR alters model training graphs, convergence curves, or statistical distributions, drop the visual comparisons or data tables here).*
+- [ ] `just check-all` passes (ruff, bandit, mypy, pytest)
+- [ ] `CHANGELOG.md` updated under `[Unreleased]`
+- [ ] New behaviour is covered by a test
+- [ ] `HF_HUB_OFFLINE=1 pytest` still passes if model loading or dependencies changed
+- [ ] `scripts/create_schema.py` run, or drift reported, if the ORM models changed
+- [ ] Documentation updated if a contract, command, setting, or security property changed
+
+### Architecture
+
+If this touches module boundaries: confirm `tests/test_architecture.py` still
+passes, and that ingestion and retrieval still do not import each other.
