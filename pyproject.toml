@@ -3,91 +3,143 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "my-project-name"
+name = "rag-study"
 version = "0.1.0"
-description = "A short description of the project"
+description = "A simple, modular, offline-capable RAG package with independent ingestion and retrieval pipelines"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" } # Added: Clear licensing boilerplate
+license = { text = "MIT" }
 authors = [
-    { name = "Your Name", email = "your.email@example.com" }
+    { name = "Konner McNeillie", email = "110234880+k-mcneillie@users.noreply.github.com" }
 ]
-classifiers = [ # Added: Standard PyPI categorisation metadata
+classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 
 dependencies = [
-    "numpy>=1.24.0",
-    "torch>=2.0.0",
-    "sesh @ git+https://github.com/k-mcneillie/sesh.git@main"
+    # Storage: SQLAlchemy ORM over MariaDB (PyMySQL is a pure-Python driver,
+    # avoiding a MariaDB Connector/C build dependency).
+    "SQLAlchemy>=2.0.30",
+    "PyMySQL>=1.1.1",
+    # Configuration: load infrastructure settings from a local .env file.
+    "python-dotenv>=1.0.1",
+    # Numerical: vector handling and the application-side ranking fallback.
+    "numpy>=1.26.0",
+    # Ingestion (Phase 3): PDF extraction.
+    "PyMuPDF>=1.24.0",
+    "pymupdf4llm>=0.0.17",
+    # Ingestion (Phase 3): encoding repair, and structure- and size-aware
+    # splitting. Both are kept behind this project's own interfaces.
+    "ftfy>=6.2.0",
+    "langchain-text-splitters>=0.3.0",
+    # Embedding (Phase 3): local, offline sentence-transformer models.
+    "sentence-transformers>=3.0.0",
+    # Generation (Phase 6): HTTP client for the answering model service.
+    "httpx>=0.27.0",
 ]
 
-
-[project.urls] # Added: Helpful navigation links for users/maintainers
-Homepage = "https://github.com/k-mcneillie/"
-Documentation = "https://github.com/k-mcneillie/"
-Repository = "https://github.com.git"
-Issues = "https://github.com/k-mcneillie/"
+[project.urls]
+Homepage = "https://github.com/k-mcneillie/rag-study"
+Repository = "https://github.com/k-mcneillie/rag-study.git"
+Issues = "https://github.com/k-mcneillie/rag-study/issues"
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
-    "pytest-cov>=5.0.0", # Added: Required for generating coverage reports
-    "ruff>=0.3.0",
-    "mypy>=1.9.0",       # Added: Required for static type checking
+    "pytest-cov>=5.0.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+    "bandit[toml]>=1.7.9",
+]
+# The chat interface. Kept optional: the package retrieves, and is tested,
+# without it, and nothing under src/ imports it.
+ui = [
+    "chainlit>=2.0.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# Prompt templates are versioned application assets shipped with the package.
+"rag.retrieval.prompts" = ["*.txt"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-# Updated: Added coverage flags so running 'pytest' automatically tracks coverage
 addopts = "-ra --strict-markers --cov=src --cov-report=term-missing --cov-report=xml"
+markers = [
+    "integration: tests requiring a live MariaDB server (deselect with '-m \"not integration\"')",
+]
 
-[tool.coverage.run] # Added: Scope coverage tracking precisely to your source code
+[tool.coverage.run]
 source = ["src"]
 omit = ["tests/*"]
 
-[tool.coverage.report] # Added: Enforce clean reporting and quality thresholds
+[tool.coverage.report]
 show_missing = true
 skip_covered = true
-fail_under = 80 # Optional: Fails the build if test coverage drops below 80%
+fail_under = 80
 
-[tool.mypy] # Added: Strict type checking config to catch errors early
+[tool.mypy]
 python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = true # Enforces writing type hints for functions
+disallow_untyped_defs = true
 disallow_incomplete_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+strict_equality = true
 
 [[tool.mypy.overrides]]
-module = "sesh.*"
+# These ship no type information of their own.
+module = ["pymupdf4llm.*", "sentence_transformers.*", "chainlit.*"]
 ignore_missing_imports = true
+
+[tool.bandit]
+# Ruff already runs the flake8-bandit rules (`S`) over every file. Bandit
+# itself is kept as well because the two do not overlap completely: Bandit
+# implements checks Ruff has not ported, and it reports severity and
+# confidence, so a finding can be triaged rather than only suppressed.
+#
+# Only shipped code is scanned. Tests are excluded because they legitimately
+# contain dummy credentials, used to prove that real ones never escape.
+exclude_dirs = ["tests", ".venv", "build", "dist"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [
-    "E",   # Error
+    "E",   # pycodestyle errors (PEP 8)
+    "W",   # pycodestyle warnings (PEP 8)
     "F",   # Pyflakes
-    "I",   # Isort
-    "B",   # Bugbear
-    "UP",  # Pyupgrade
-    "C90", # Mccabe code complexity
-    "C4",  # Flake8-comprehensions
-    "N",   # Added: PEP8 Naming conventions (e.g., classes must be PascalCase)
-    "SIM", # Added: Flake8-simplify (helps you write cleaner, shorter logic)
-    "ARG", # Added: Unused arguments (catches dead variables in functions)
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade (modern 3.12+ syntax)
+    "C90", # mccabe complexity
+    "C4",  # flake8-comprehensions
+    "N",   # PEP 8 naming conventions
+    "SIM", # flake8-simplify
+    "ARG", # unused arguments
+    "D",   # pydocstyle (Google-style docstrings)
+    "S",   # flake8-bandit (security)
+    "ANN", # flake8-annotations (type annotations required)
+    "RUF", # Ruff-specific rules
 ]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use `assert` (S101) and contain dummy credentials used to
+# prove that real ones are never exposed (S105, S106).
+"tests/*" = ["S101", "S105", "S106"]
 
 [tool.ruff.format]
 quote-style = "double"
