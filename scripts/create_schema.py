@@ -27,9 +27,10 @@ import sys
 
 from sqlalchemy import Engine, create_engine, text
 
-from rag.storage.orm import Base
+from rag.storage.orm import EMBEDDING_DIMENSION, Base
 
 ADMIN_URL_VAR = "RAG_ADMIN_DB_URL"
+_DIMENSION_VAR = "RAG_EMBEDDING_DIMENSION"
 
 #: Columns are read from ``information_schema`` rather than through
 #: SQLAlchemy's reflection, which cannot parse MariaDB's ``VECTOR`` type and
@@ -39,6 +40,44 @@ _COLUMNS_QUERY = text(
     "SELECT table_name, column_name FROM information_schema.columns "
     "WHERE table_schema = DATABASE()"
 )
+
+
+def check_dimension() -> int | None:
+    """Check that the configured embedding dimension matches the ORM.
+
+    The ``VECTOR`` column's width is fixed at class-definition time in
+    ``rag.storage.orm``, so it cannot read ``Settings`` at import time the way
+    the application does at runtime. If the two ever disagree, the schema
+    would be created with the wrong column width, and the first symptom would
+    be an unrelated-looking dimension-mismatch failure during ingestion or
+    retrieval. Catching it here, before any table is created, keeps that
+    failure loud and immediate instead of silent.
+
+    Returns:
+        ``None`` if the two agree, or an exit status if they do not.
+    """
+    raw = os.environ.get(_DIMENSION_VAR, "").strip()
+    if not raw:
+        return None
+    try:
+        configured = int(raw)
+    except ValueError:
+        print(f"{_DIMENSION_VAR} must be an integer.", file=sys.stderr)
+        return 1
+
+    if configured != EMBEDDING_DIMENSION:
+        print(
+            f"{_DIMENSION_VAR} is set to {configured}, but "
+            f"rag.storage.orm.EMBEDDING_DIMENSION is {EMBEDDING_DIMENSION}. "
+            f"The VECTOR column's width is fixed when the ORM model is "
+            f"defined, so creating the schema now would build it at the "
+            f"wrong width. Update EMBEDDING_DIMENSION in rag/storage/orm.py "
+            f"to {configured} to match, then run this script again.",
+            file=sys.stderr,
+        )
+        return 1
+
+    return None
 
 
 def find_drift(engine: Engine) -> dict[str, list[str]]:
@@ -88,6 +127,10 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    dimension_error = check_dimension()
+    if dimension_error is not None:
+        return dimension_error
 
     engine = create_engine(url)
     try:
