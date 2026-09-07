@@ -1,8 +1,12 @@
+
 # rag-study
 
 A simple, modular, offline-capable Retrieval-Augmented Generation package.
 Documents go in; ranked, cited context comes out — and, through a chat
 interface that sits outside the package, an answer with its sources.
+
+<img width="1715" height="894" alt="image" src="https://github.com/user-attachments/assets/012db40b-f237-4aef-a197-c0e5b6b4f6e9" />
+<img width="1715" height="894" alt="image" src="https://github.com/user-attachments/assets/ec39403e-946f-4376-bcb1-c7cc0d66865f" />
 
 ---
 
