@@ -24,32 +24,6 @@ Check it worked:
 python -c "import rag; print(rag.__version__)"    # 0.1.0
 ```
 
-## 2. Start MariaDB and create the databases
-
-Requires **MariaDB 11.7 or later** — earlier versions have no `VECTOR` type.
-Verified against 12.3.3.
-
-```bash
-brew services start mariadb          # macOS; use your platform's equivalent
-mariadb -e "SELECT VERSION();"       # must be >= 11.7
-```
-
-Create the databases and a **least-privilege application user**. The
-application needs only to read and write rows; it is deliberately not allowed
-to change the schema, so a bug or an injected statement cannot alter it:
-
-```sql
-CREATE DATABASE rag_study      CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE rag_study_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE USER 'rag_app'@'localhost' IDENTIFIED BY 'choose-a-strong-password';
-GRANT SELECT, INSERT, UPDATE, DELETE ON rag_study.* TO 'rag_app'@'localhost';
-
--- The test database is disposable; the suite creates and drops its own tables.
-GRANT ALL PRIVILEGES ON rag_study_test.* TO 'rag_app'@'localhost';
-FLUSH PRIVILEGES;
-```
-
 ## 3. Configure
 
 ```bash
@@ -164,10 +138,10 @@ answer was given.
 The model is a service, reached over HTTP and chosen by configuration:
 
 ```bash
-RAG_LLM_PROVIDER=ollama                     # or vllm, or openai
-RAG_LLM_BASE_URL=http://localhost:11434     # vLLM and OpenAI want the /v1 root
-RAG_LLM_MODEL=deepseek-r1:14b
-RAG_LLM_API_KEY=                            # only for a service that needs one
+RAG_LLM_PROVIDER=       
+RAG_LLM_BASE_URL=    
+RAG_LLM_MODEL=
+RAG_LLM_API_KEY=                         
 ```
 
 `openai` covers anything speaking the OpenAI chat completions API — LM Studio,
@@ -198,7 +172,7 @@ contracts and storage:
 ```text
      config      domain      model_assets     (leaves: no internal deps)
                     ▲
-                 storage                      (SQLAlchemy + MariaDB)
+                 storage                      
                     ▲
         ┌───────────┴───────────┐
     ingestion                retrieval
