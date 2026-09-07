@@ -11,9 +11,6 @@ dependencies:
   # --- Configuration -------------------------------------------------------
   - python-dotenv>=1.0.1     # load infrastructure config from a local .env
 
-  # --- Numerical -----------------------------------------------------------
-  - numpy>=1.26              # vector handling, application-side ranking path
-
   # --- Ingestion (Phase 3) -------------------------------------------------
   - pymupdf>=1.24            # PDF parsing and text extraction
 
