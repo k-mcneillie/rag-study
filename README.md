@@ -2,9 +2,7 @@
 
 A simple, modular, offline-capable Retrieval-Augmented Generation package.
 Documents go in; ranked, cited context comes out — and, through a chat
-interface that sits outside the package, an answer with its sources. It runs
-with **no internet connection**: model weights are local files, and nothing is
-downloaded while the system is running.
+interface that sits outside the package, an answer with its sources.
 
 ---
 
