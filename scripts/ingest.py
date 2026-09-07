@@ -20,7 +20,12 @@ import sys
 from pathlib import Path
 
 from rag.config import ConfigurationError, Settings, load_settings
-from rag.ingestion import ChunkingPipeline, IngestionOrchestrator, PDFExtractor
+from rag.ingestion import (
+    ChunkingPipeline,
+    IngestionOrchestrator,
+    PDFExtractor,
+    SemanticChunker,
+)
 from rag.ingestion.embedding.local import LocalSentenceTransformerEmbedder
 from rag.model_assets import ModelUnavailableError
 from rag.storage import MariaDBRepository, build_engine, build_session_factory
@@ -39,19 +44,24 @@ def build_orchestrator(settings: Settings) -> IngestionOrchestrator:
         ModelUnavailableError: If the embedding model is not provisioned.
     """
     sessions = build_session_factory(build_engine(settings.database))
+    embedder = LocalSentenceTransformerEmbedder(
+        settings.embedding_model_path,
+        model_name=settings.embedding_model_name,
+        batch_size=settings.embedding_batch_size,
+    )
     return IngestionOrchestrator(
         extractor=PDFExtractor(
             max_bytes=settings.max_document_bytes,
             max_pages=settings.max_document_pages,
         ),
         chunker=ChunkingPipeline(
-            chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+            semantic_chunker=SemanticChunker(embedder)
+            if settings.semantic_chunking
+            else None,
         ),
-        embedder=LocalSentenceTransformerEmbedder(
-            settings.embedding_model_path,
-            model_name=settings.embedding_model_name,
-            batch_size=settings.embedding_batch_size,
-        ),
+        embedder=embedder,
         repository=MariaDBRepository(
             sessions,
             embedding_dimension=settings.embedding_dimension,
