@@ -26,8 +26,6 @@ dependencies = [
     "PyMySQL>=1.1.1",
     # Configuration: load infrastructure settings from a local .env file.
     "python-dotenv>=1.0.1",
-    # Numerical: vector handling and the application-side ranking fallback.
-    "numpy>=1.26.0",
     # Ingestion (Phase 3): PDF extraction.
     "PyMuPDF>=1.24.0",
     "pymupdf4llm>=0.0.17",

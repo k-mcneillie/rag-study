@@ -313,6 +313,10 @@ class Settings:
         max_document_pages: Most pages extracted from one document.
         chunk_size: Target maximum chunk size, in characters.
         chunk_overlap: Characters shared between adjacent chunks.
+        semantic_chunking: Whether to additionally split oversized structural
+            sections along sentence-embedding similarity boundaries, rather
+            than by character count alone. Off by default: it costs an extra
+            pass over the embedding model at ingestion time.
     """
 
     database: DatabaseSettings
@@ -332,6 +336,7 @@ class Settings:
     max_document_pages: int = 2000
     chunk_size: int = 1200
     chunk_overlap: int = 150
+    semantic_chunking: bool = False
 
     @classmethod
     def from_env(
@@ -370,6 +375,7 @@ class Settings:
             max_document_pages=_optional_int(env, "MAX_DOCUMENT_PAGES", 2000),
             chunk_size=_optional_int(env, "CHUNK_SIZE", 1200),
             chunk_overlap=_optional_int(env, "CHUNK_OVERLAP", 150),
+            semantic_chunking=_optional_bool(env, "SEMANTIC_CHUNKING", False),
         )
 
 

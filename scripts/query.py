@@ -21,72 +21,9 @@ from __future__ import annotations
 import argparse
 import sys
 
-from rag.config import ConfigurationError, Settings, load_settings
+from rag.assembly import build_retrieval_orchestrator
+from rag.config import ConfigurationError, load_settings
 from rag.model_assets import ModelUnavailableError
-from rag.retrieval import (
-    CosineSimilarityRanker,
-    CrossEncoderReranker,
-    PassthroughReranker,
-    RetrievalOrchestrator,
-    TemplatePromptAugmenter,
-)
-from rag.retrieval.embedding.local import LocalSentenceTransformerQueryEmbedder
-from rag.retrieval.interfaces import BaseReranker
-from rag.storage import MariaDBRepository, build_engine, build_session_factory
-
-
-def build_reranker(settings: Settings) -> BaseReranker:
-    """Choose a reranker based on what has been provisioned.
-
-    Args:
-        settings: Application settings.
-
-    Returns:
-        A cross-encoder reranker when one is configured, otherwise the
-        passthrough, which keeps the initial ranking.
-
-    Raises:
-        ModelUnavailableError: If a reranker is configured but missing. A
-            configured model that cannot be loaded is an error rather than a
-            silent downgrade, so a misconfiguration is never mistaken for a
-            deliberate choice to skip reranking.
-    """
-    if settings.reranker_model_path is None:
-        return PassthroughReranker()
-    return CrossEncoderReranker(
-        settings.reranker_model_path, batch_size=settings.reranker_batch_size
-    )
-
-
-def build_orchestrator(settings: Settings) -> RetrievalOrchestrator:
-    """Assemble the retrieval pipeline from configuration.
-
-    Args:
-        settings: Application settings.
-
-    Returns:
-        The wired orchestrator.
-
-    Raises:
-        ModelUnavailableError: If a configured model is not provisioned.
-    """
-    sessions = build_session_factory(build_engine(settings.database))
-    repository = MariaDBRepository(
-        sessions,
-        embedding_dimension=settings.embedding_dimension,
-        max_top_k=settings.max_top_k,
-    )
-    return RetrievalOrchestrator(
-        query_embedder=LocalSentenceTransformerQueryEmbedder(
-            settings.embedding_model_path
-        ),
-        ranker=CosineSimilarityRanker(repository),
-        reranker=build_reranker(settings),
-        prompt_augmenter=TemplatePromptAugmenter(
-            prompt_name=settings.prompt_name, prompt_version=settings.prompt_version
-        ),
-        max_top_k=settings.max_top_k,
-    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -112,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         settings = load_settings()
-        orchestrator = build_orchestrator(settings)
+        orchestrator = build_retrieval_orchestrator(settings)
     except (ConfigurationError, ModelUnavailableError) as exc:
         print(f"Cannot start: {exc}", file=sys.stderr)
         return 1
