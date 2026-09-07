@@ -49,7 +49,8 @@ This repository uses a two-tier branch strategy:
 to:
 
 - require a pull request before merging (no direct pushes),
-- require status checks (once CI is wired up) to pass before merging,
+- require the CI status checks (`.github/workflows/ci.yml`) to pass before
+  merging,
 - disallow force pushes and branch deletion.
 
 This can be applied with the GitHub CLI once it is installed and
@@ -69,5 +70,5 @@ gh api -X PUT repos/k-mcneillie/rag-study/branches/dev/protection \
   -F restrictions=null
 ```
 
-Adjust `required_approving_review_count` and `required_status_checks` once
-CI and/or reviewers are in place.
+Adjust `required_approving_review_count` and `required_status_checks` to match
+the checks in `.github/workflows/ci.yml` and the review policy in force.
