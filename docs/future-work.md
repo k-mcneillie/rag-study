@@ -52,15 +52,26 @@ is attacker-controlled. And whether the `Page` contract still fits: slides and
 LaTeX sources paginate differently from PDFs, and a more general "location"
 concept may serve better than a page number.
 
+**Related.** The API's `POST /documents` ingests one file synchronously and
+blocks until it is indexed. A larger corpus or bigger files want an accepted +
+background-job shape with a status endpoint; the synchronous form is enough at
+the current scale.
+
 ## 3. Access control and multi-tenancy
 
-The system assumes every caller may see every document.
+The system assumes every caller may see every document. The HTTP API
+(`service/`) has one shared `RAG_API_KEY` and nothing finer: no per-user
+identity, no rotation, no rate limiting, and no TLS — a reverse proxy is
+assumed for the last two.
 
-**What it would involve.** The seam exists and is tested: `similarity_search`
-takes a `filters` mapping validated against an explicit allow-list, and the
-orchestrator passes it through untouched. Adding scope means adding a column to
-`documents`, extending the allow-list, and resolving a caller's permitted scope
-before the query — not restructuring retrieval.
+**What it would involve.** The retrieval seam exists and is tested:
+`similarity_search` takes a `filters` mapping validated against an explicit
+allow-list, and the orchestrator passes it through untouched. Adding scope
+means adding a column to `documents`, extending the allow-list, resolving a
+caller's identity (a real auth scheme on the API in place of the shared key),
+and resolving their permitted scope before the query — not restructuring
+retrieval. The `/answer` request would carry an optional document filter that
+feeds that seam.
 
 **What would need care.** Filtering must happen in the query, not after results
 return, or the ranking silently degrades as filtered results are discarded. And
@@ -127,4 +138,4 @@ Stated so that their absence reads as a decision.
   lookup — not a registry, not discovery.
 - **Async.** Ingestion is throughput-bound on model inference, not on waiting.
   Async would add colour to every function signature for no measured gain. The
-  chat interface bridges to async in `app/main.py` alone.
+  HTTP API bridges to async in `service/streaming.py` alone.

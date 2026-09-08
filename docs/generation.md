@@ -1,26 +1,30 @@
 # Generation and the chat interface
 
-The package retrieves; it does not generate. This document covers the two
-pieces on the far side of that boundary: `rag.generation`, which answers from a
-`PromptContext`, and the Chainlit application in [`app/`](../app), which puts a
-chat window in front of it.
+The package retrieves; it does not generate. This document covers the pieces on
+the far side of that boundary: `rag.generation`, which answers from a
+`PromptContext`; the HTTP API in [`service/`](../service) that exposes
+retrieval-and-answer over the network; and the Chainlit application in
+[`app/`](../app), a chat window that talks only to that API.
 
-Both are optional. Retrieval works, and is tested, with no model service
-configured and the interface not installed (`pip install -e ".[ui]"` adds it).
+All of it is optional. Retrieval works, and is tested, with no model service
+configured, the API not run, and the interface not installed. The wire
+contract, the endpoints, and how to run the two is [api.md](api.md); this
+document is about the generation contract itself.
 
 ## The boundary
 
 ```text
-                    ┌───────────────────── src/rag ─────────────────────┐
-  question ────────>│ retrieval ──> PromptContext ──> generation        │──> AnswerDelta stream
-                    │  (unchanged)     (domain)        (sibling package) │
-                    └───────────────────────────────────────────────────┘
-                                                             │
-                              app/main.py  ─────────────────┘   scripts/answer.py
-                              (Chainlit, async)                  (terminal)
-                                     │
-                                     ▼
-                          rag.feedback ──> results/feedback.jsonl
+             ┌──────────────────── src/rag ────────────────────┐
+  question ─>│ retrieval ──> PromptContext ──> generation      │─> AnswerDelta stream
+             │  (unchanged)     (domain)       (sibling)       │
+             └────────────────────────────────────────────────┬┘
+                                                              │
+    scripts/answer.py (terminal)                    service/app.py  ──> SSE stream
+                                                    (FastAPI, async)      │
+                                                          ▼               ▼
+                                          rag.feedback              app/  (Chainlit)
+                                          results/feedback.jsonl    an HTTP client,
+                                                                    no rag import
 ```
 
 Three properties hold, two of them enforced by `tests/test_architecture.py`:
@@ -28,19 +32,22 @@ Three properties hold, two of them enforced by `tests/test_architecture.py`:
 - **`generation` imports `domain` and `config`, and nothing else.** It cannot
   see `retrieval`, `ingestion`, or `storage`. It receives a `PromptContext` and
   has no way to reconstruct one.
-- **The rendered prompt is sent verbatim.** `TemplatePromptAugmenter` builds a
-  prompt with a structural boundary between application instructions and
-  untrusted document content. A client that re-templated that text or split it
-  across message roles would move a boundary it does not own, so none do: the
-  prompt goes out as a single user message.
-- **The interface lives outside the package.** `app/` assembles its own
-  pipeline, exactly as `scripts/` does, through `rag.assembly`. Deleting it
-  removes the interface and nothing else.
+- **The rendered prompt is sent verbatim, and never leaves the service.**
+  `TemplatePromptAugmenter` builds a prompt with a structural boundary between
+  application instructions and untrusted document content. The API exposes an
+  *answer* endpoint that runs generation server-side; it has no endpoint that
+  returns a `PromptContext`, so no client can re-template that text or split it
+  across message roles.
+- **Every consumer lives outside the package.** `scripts/` and `service/`
+  assemble their own pipeline through `rag.assembly`; `app/` assembles nothing
+  and imports `rag` not at all. Deleting any of them removes that consumer and
+  nothing else.
 
-The interface is asynchronous and the package is not. `asyncio.to_thread`
-bridges the two, in `app/main.py` alone: retrieval and generation run in a
-worker thread, and each streamed fragment is pulled from the synchronous
-generator the same way. No signature inside `src/rag` is coloured by it.
+`rag.generation` is synchronous and the API is not. `asyncio.to_thread` bridges
+the two, in `service/streaming.py`: each streamed fragment is pulled from the
+synchronous generator in a worker thread. No signature inside `src/rag` is
+coloured by it. `scripts/answer.py` consumes the same synchronous stream
+directly.
 
 ## The generation contract
 
@@ -143,23 +150,27 @@ client is usually the request body and the response shape and nothing else.
 
 ## The chat interface
 
-`app/main.py`. `chainlit run app/main.py`, or `just ui`, serves it at
-`http://localhost:8000`. `just ask "your question"` runs the same loop without
-a browser via `scripts/answer.py`. The database must be reachable and the model
-service must already be running with the model available; neither is started
-from here, and nothing is downloaded.
+`app/` is a standalone Chainlit client of the API — its own `src/` project with
+its own `pyproject.toml` and no dependency on `rag`. `just serve` runs the API,
+then `just ui` (`chainlit run app/src/rag_chat/main.py`) serves the chat at
+`http://localhost:8000`. `just ask "your question"` runs the loop in-process,
+without either, via `scripts/answer.py`. The full run and configuration is in
+[api.md](api.md).
 
-The interface loads the pipeline once per session, streams the answer, and:
+Per session the app calls `GET /health` for its banner, then for each question
+streams `POST /answer` and:
 
 - renders each cited passage as an inspectable side element, numbered from one
-  to match the `[n]` markers in the prompt, showing the page, section path,
-  reranker score, and document id;
+  to match the `[n]` markers in the answer, showing the page, section path, and
+  reranker score. The passage *text* stays on the service — the app is given
+  only provenance — so the panel says where a passage came from, not what it
+  said;
 - keeps the model's reasoning in a collapsed step above the answer;
-- when retrieval found nothing, states so and does not call the model — an
-  answer with no sources would be a guess;
-- places passage text in a fenced code block, because it is untrusted document
-  content and the interface renders Markdown: a document containing image or
-  link syntax is displayed, not obeyed.
+- on a `no_context` event, states that nothing matched and does not show an
+  answer — the service never called the model;
+- with no service reachable, or `RAG_CHAT_DEMO=1`, streams a canned answer
+  through the same UI so the interface can be demonstrated with no backend.
+  Ratings are not recorded in that mode.
 
 `scripts/answer.py` takes `--top-k`, `--document-id`, `--show-prompt`, and
 `--show-reasoning`, and is the quickest way to see what the model was actually
@@ -167,9 +178,11 @@ sent.
 
 ## Feedback
 
-`rag/feedback.py`. Each answer carries thumbs-up and thumbs-down buttons. A
-click appends one JSON object to `RAG_FEEDBACK_PATH` (default
-`results/feedback.jsonl`):
+`rag/feedback.py`. Each answer carries thumbs-up and thumbs-down buttons. The
+app posts the rating and the fields the log records to `POST /feedback`; the
+service builds the record and appends one JSON object to `RAG_FEEDBACK_PATH`
+(default `results/feedback.jsonl`). No passage text crosses the wire — only the
+provenance the log already keeps.
 
 ```json
 {

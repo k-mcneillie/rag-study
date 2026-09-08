@@ -4,9 +4,10 @@ A modular, offline-capable Retrieval-Augmented Generation package. Documents go
 in; ranked, cited context comes out. It runs with no internet connection: model
 weights are local files, and nothing is downloaded while the system is running.
 
-The package stops at assembled context. Answering is a separate sibling package,
-`rag.generation`, and a chat interface over both lives in `app/`, outside the
-package.
+The package stops at assembled context. Answering is a separate sibling
+package, `rag.generation`. An HTTP API over the query side lives in `service/`,
+and a standalone Chainlit chat app that talks only to that API lives in `app/`
+— both outside the package. See [docs/api.md](docs/api.md).
 
 ## What it solves
 
@@ -48,8 +49,9 @@ for a need that does not yet exist.
 MariaDB 11.7+ (native `VECTOR` column and cosine vector index), SQLAlchemy,
 PyMySQL, `sentence-transformers` for local embedding and cross-encoder models,
 `pymupdf` / `pymupdf4llm` for layout-aware PDF extraction, `langchain-text-splitters`
-and `ftfy` behind the project's own interfaces, `httpx` for the answering
-service, and Chainlit for the optional interface.
+and `ftfy` behind the project's own interfaces, and `httpx` for the answering
+service. The optional HTTP API is FastAPI + `sse-starlette`; the optional chat
+app is Chainlit talking to it over `httpx`.
 
 ## Quick start
 
@@ -166,10 +168,21 @@ assembled context.
 ### Get an answer
 
 ```bash
-pip install -e ".[ui]"                       # the chat interface; not needed to retrieve
-just ui                                      # http://localhost:8000
-just ask "How does DPO avoid training a reward model?"    # no browser
+just ask "How does DPO avoid training a reward model?"    # in-process, no browser
 ```
+
+Or over the HTTP API, with the Chainlit chat app in front of it:
+
+```bash
+pip install -e ".[api,ui]" && pip install -e app/    # the API and the chat app
+just serve                                           # http://localhost:8080
+just ui                                              # http://localhost:8000
+```
+
+`app/` is its own project with no dependency on `rag` — it can be lifted into
+another repository and pointed at a deployed service. With no service running
+it starts in demo mode. Full contract, endpoints, and auth in
+[docs/api.md](docs/api.md).
 
 The model is a service reached over HTTP and chosen by configuration:
 
@@ -198,6 +211,7 @@ ones a first deployment sets:
 | `RAG_PROMPT_NAME` / `RAG_PROMPT_VERSION` | `retrieval_context` / `v1` | which prompt template renders context |
 | `RAG_SEMANTIC_CHUNKING` | `false` | split oversized sections at topic boundaries (costs an extra embedding pass) |
 | `RAG_LLM_*` | see `.env.example` | the optional answering service |
+| `RAG_API_KEY` / `RAG_API_HOST` / `RAG_API_PORT` | unset / `127.0.0.1` / `8080` | the HTTP API; an unset key means it runs open ([docs/api.md](docs/api.md)) |
 
 ## Offline operation
 
@@ -254,7 +268,8 @@ implemented, what is assumed, and what is not — is in
 | [docs/architecture.md](docs/architecture.md) | boundaries, contracts, dependency rules, weaknesses |
 | [docs/ingestion.md](docs/ingestion.md) | the ingestion pipeline, stage by stage |
 | [docs/retrieval.md](docs/retrieval.md) | the retrieval pipeline, and prompt versioning |
-| [docs/generation.md](docs/generation.md) | `rag.generation`, the chat interface, feedback |
+| [docs/generation.md](docs/generation.md) | `rag.generation`, the generation contract, feedback |
+| [docs/api.md](docs/api.md) | the HTTP API (`service/`) and the standalone chat app (`app/`) |
 | [docs/security.md](docs/security.md) | the security model and its mitigations |
 | [docs/database-cheatsheet.md](docs/database-cheatsheet.md) | operating MariaDB for this project |
 | [docs/model-deployment-cheatsheet.md](docs/model-deployment-cheatsheet.md) | provisioning local model assets |

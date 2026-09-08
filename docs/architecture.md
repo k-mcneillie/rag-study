@@ -36,9 +36,16 @@ context: a block of retrieved text with the provenance of every passage in it.
 It does not call a language model.
 
 Answering is provided by a separate package, `rag.generation`, which consumes
-the retrieval output from outside. A chat interface over both lives in `app/`,
-outside the package entirely. Both are optional: retrieval works, and is
-tested, with no model service configured and the interface not installed.
+the retrieval output from outside. An HTTP API over the query side lives in
+`service/`, and a chat interface that talks only to that API lives in `app/` —
+both outside the package entirely, both entry points like `scripts/`. All of
+it is optional: retrieval works, and is tested, with no model service
+configured, the API not run, and the interface not installed.
+
+The prompt is built and consumed entirely inside the service. No endpoint
+returns an assembled `PromptContext` to a caller, so the boundary between
+application instructions and untrusted document content cannot be moved by a
+client (§4).
 
 Model weights are local files, provisioned once at setup. No component reaches
 the network at run time.
@@ -88,7 +95,10 @@ The boundary between application instructions and untrusted document content is
 established once, by the prompt augmenter, and the rendered prompt is sent to
 the model verbatim. A client that could reconstruct the prompt from parts would
 be able to move that boundary without owning it, so none can: the client
-receives a finished `PromptContext` and has no way to rebuild one.
+receives a finished `PromptContext` and has no way to rebuild one. The HTTP API
+holds to the same line — it exposes an *answer* endpoint that runs generation
+server-side, and no endpoint that returns a `PromptContext` (see
+[api.md](api.md)).
 
 ## 5. Dependency graph
 
@@ -128,10 +138,12 @@ The rules enforced by `tests/test_architecture.py` are, verbatim, the
 | `generation` | `domain`, `config` |
 | `assembly` | `domain`, `config`, `storage`, `retrieval`, `generation`, `model_assets` |
 
-Three further checks in the same file assert that the pipelines never import
+Four further checks in the same file assert that the pipelines never import
 each other, that `generation` imports neither pipeline nor `storage`, that no
-`domain` module imports a third-party framework, and that only `storage`
-imports SQLAlchemy.
+`domain` module imports a third-party framework, that only `storage` imports
+SQLAlchemy, and that nothing under `src/rag` imports an entry point
+(`service/`, `app/`) or a web framework (`fastapi`, `starlette`, `chainlit`) —
+the package must not depend on what depends on it.
 
 ## 6. Domain contracts
 
@@ -284,8 +296,13 @@ dictionary and a lookup.
 
 `rag.assembly` holds the composition for the query side —
 `build_retrieval_orchestrator`, `build_reranker`, `build_chat_model` — used by
-`scripts/query.py`, `scripts/answer.py`, and `app/main.py`. The ingestion
-pipeline is composed in `scripts/ingest.py`. Configuration selects
+`scripts/query.py`, `scripts/answer.py`, and `service/app.py`. The ingestion
+pipeline is composed in `scripts/ingest.py`, and again in
+`service/ingest_wiring.py` for the upload endpoint (a few lines of
+construction: `rag.assembly` must never import `ingestion`, so the wiring
+cannot live there). The chat app in `app/` composes nothing from `rag` — it is
+an HTTP client of `service/` and imports the package not at all. Configuration
+selects
 implementations: an unset `RAG_RERANKER_MODEL_PATH` yields the passthrough
 reranker, `RAG_SEMANTIC_CHUNKING` adds the semantic chunker, `RAG_LLM_PROVIDER`
 selects the chat-model client, and `RAG_PROMPT_NAME` / `RAG_PROMPT_VERSION`
@@ -357,6 +374,10 @@ Stated plainly, because they follow from the priorities in §1.
 8. **No external security review.** The mitigations in [security.md](security.md)
    are implemented and tested, but no adversarial review by anyone other than
    the author has taken place.
+9. **The API has one shared key and no more.** `service/` checks a single
+   `RAG_API_KEY` against `X-API-Key`, and runs open when the key is unset.
+   There is no per-user identity, rate limiting, or TLS; those belong to a
+   reverse proxy. See [api.md](api.md) and [future-work.md](future-work.md).
 
 ## 14. Documentation map
 
@@ -366,6 +387,7 @@ Stated plainly, because they follow from the priorities in §1.
 | The ingestion pipeline | [ingestion.md](ingestion.md) |
 | The retrieval pipeline | [retrieval.md](retrieval.md) |
 | Answering and the chat interface | [generation.md](generation.md) |
+| The HTTP API and the chat app | [api.md](api.md) |
 | The security model | [security.md](security.md) |
 | Operating the database | [database-cheatsheet.md](database-cheatsheet.md) |
 | Provisioning model assets | [model-deployment-cheatsheet.md](model-deployment-cheatsheet.md) |

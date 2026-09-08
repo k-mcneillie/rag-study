@@ -26,7 +26,7 @@ python scripts/query.py "..." --top-k 3 --document-id <id> --show-prompt
 
 `rag.assembly.build_retrieval_orchestrator` composes the pipeline from
 configuration, and is shared by `scripts/query.py`, `scripts/answer.py`, and
-`app/main.py`.
+`service/app.py` (the HTTP API — see [api.md](api.md)).
 
 ## Query embedding — `LocalSentenceTransformerQueryEmbedder`
 

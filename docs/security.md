@@ -240,13 +240,31 @@ exactly one place — `ChunkingPipeline._keep`, which checks
 reference-list chunk. It is never turned into SQL, a filesystem path,
 configuration, or executable content, and is never placed in the prompt.
 
+## The HTTP API
+
+**Implemented.** `service/` exposes only an *answer* endpoint over the query
+side, never one that returns an assembled `PromptContext`. Retrieval and
+generation both run inside the service, so the boundary between application
+instructions and untrusted document content — established once by the prompt
+augmenter — cannot be relocated by a client. `POST /feedback` carries
+provenance only, never passage text, so the corpus is not copied over the wire.
+`tests/test_architecture.py` asserts nothing under `src/rag` imports
+`service/`, `app/`, or a web framework.
+
+**Known limitation.** Access control is one optional shared secret,
+`RAG_API_KEY`, checked with `hmac.compare_digest` on every route except
+`GET /health`. Unset, the service runs open. There is no per-user identity,
+rotation, or rate limiting, and no TLS — a reverse proxy is assumed for the
+last two before the service is exposed. See [api.md](api.md) and
+[future-work.md](future-work.md) §3.
+
 ## Data isolation
 
 **Known limitation.** The system is single trust domain. There is no user,
-account, or session model; no authentication or authorization anywhere in
-`src/`; and the Chainlit application builds a pipeline for any connecting
-client. The `documents`, `pages`, `chunks`, and `embeddings` tables have no
-owner or tenant column.
+account, or session model, and no authorization beyond the API's shared key;
+the Chainlit app is a thin client that any browser can reach, and the service
+builds one pipeline shared by every caller. The `documents`, `pages`,
+`chunks`, and `embeddings` tables have no owner or tenant column.
 
 **Design assumption.** Every caller may see every stored document.
 
@@ -316,12 +334,14 @@ Tests: `tests/ingestion/test_orchestrator.py::test_an_unreadable_document_is_rep
 
 ## Dependency security
 
-**Implemented.** The runtime dependency set is nine packages. Nothing is
-downloaded at run time, so a compromised registry cannot reach a running
-system. `bandit` and Ruff's `flake8-bandit` (`S`) rules run over `src/`,
-`app/`, and `scripts/` in `just check-all` and in CI, where any finding fails
-the build. Tests are exempt from `S101` / `S105` / `S106` because they contain
-dummy credentials used to prove real ones never escape.
+**Implemented.** The package's runtime dependency set is nine packages; the
+optional HTTP API (`service/`) and chat app (`app/`) add a few more behind
+their own extras. Nothing is downloaded at run time, so a compromised registry
+cannot reach a running system. `bandit` and Ruff's `flake8-bandit` (`S`) rules
+run over `src/`, `service/`, `app/src/`, and `scripts/` in `just check-all` and
+in CI, where any finding fails the build. Tests are exempt from `S101` /
+`S105` / `S106` because they contain dummy credentials used to prove real ones
+never escape.
 
 **Known limitation.** Dependencies are constrained by lower bound (`>=`) only.
 There is no lock file, no hash pinning, and no configured offline install path
@@ -341,7 +361,8 @@ The suite exercises the attack, not only the happy path:
 | Prompt injection | injected instructions stay quoted; document and query cannot forge the boundary; marker forgeries neutralised; provenance cannot be forged; template identifiers cannot traverse the prompt directory |
 | Credentials | missing variable named without its value; password absent from `repr`; reserved characters escaped; bearer token present when set and absent when not; rejected credential reported |
 | Generation | malformed stream is a `GenerationError` |
-| Architecture | pipelines never import each other; generation imports no pipeline; only storage imports SQLAlchemy; domain is framework-free |
+| HTTP API | missing / wrong `X-API-Key` rejected; `/health` open; unset key runs open; non-PDF and oversized uploads rejected; `GenerationError` becomes an `error` event, not a 500 |
+| Architecture | pipelines never import each other; generation imports no pipeline; only storage imports SQLAlchemy; domain is framework-free; the package imports no entry point or web framework |
 
 **Not covered**, because the corresponding feature or guard does not exist:
 data isolation, decompression-bomb handling, dependency and supply-chain
