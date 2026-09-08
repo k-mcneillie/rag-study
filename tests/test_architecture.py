@@ -175,6 +175,32 @@ def test_domain_contracts_are_free_of_frameworks() -> None:
                 )
 
 
+def test_the_package_never_imports_an_entry_point_or_a_web_framework() -> None:
+    """The package does not depend on the things that depend on it.
+
+    The API service (``service/``) and the chat app (``app/``) compose the
+    package; the package must not reach back into them, and it must not import
+    the web frameworks they are built on. This is what lets either be deleted,
+    or lifted into another repository, without touching ``src/rag``.
+    """
+    forbidden_roots = {"service", "rag_chat", "fastapi", "starlette", "chainlit"}
+
+    for source in sorted(PACKAGE_ROOT.rglob("*.py")):
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                roots = {node.module.split(".")[0]}
+            elif isinstance(node, ast.Import):
+                roots = {alias.name.split(".")[0] for alias in node.names}
+            else:
+                continue
+            offending = roots & forbidden_roots
+            assert not offending, (
+                f"{source.relative_to(PACKAGE_ROOT)} imports {sorted(offending)}; "
+                f"the package must not depend on an entry point or a web framework."
+            )
+
+
 def test_only_storage_imports_sqlalchemy() -> None:
     """Database concerns stay inside the storage layer.
 
