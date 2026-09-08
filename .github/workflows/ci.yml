@@ -29,7 +29,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install .[dev]
+          # api + ui extras so service/ and app/ type-check and their tests
+          # run; the app is installed as its own project so `rag_chat` imports.
+          python -m pip install .[dev,api,ui]
+          python -m pip install ./app
 
       - name: Lint and format check (Ruff)
         run: |
@@ -41,14 +44,14 @@ jobs:
       # finding can be triaged rather than only suppressed. Any finding fails
       # the build.
       - name: Security scan (Bandit)
-        run: bandit -c pyproject.toml -q -r src/ app/ scripts/
+        run: bandit -c pyproject.toml -q -r src/ service/ app/src/ scripts/
 
       # The entry points are checked as well as the package. They hold real
-      # logic — assembly, streaming, session state — and the interface is not
-      # installed here, so this also proves the app type-checks against a
-      # bare dependency set rather than only on a developer's machine.
+      # logic — assembly, streaming, session state — so this proves service/
+      # and app/ type-check against a declared dependency set, not just on a
+      # developer's machine.
       - name: Type check (Mypy)
-        run: mypy src/ app/ scripts/
+        run: mypy src/ service/ app/src/ app/tests/ scripts/
 
       # Integration tests need a live MariaDB and local model weights, neither
       # of which exists on a runner. They are deselected rather than skipped so
