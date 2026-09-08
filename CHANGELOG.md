@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- HTTP API in `service/` (FastAPI), an entry point over the query side like
+  `scripts/`, never part of the package:
+  - `GET /health`, `POST /answer` (server-sent events: `citations`, `delta`,
+    `done`, `no_context`, `error`), `POST /feedback`, `POST /documents`
+    (synchronous single-PDF upload).
+  - Generation runs entirely server-side; no endpoint returns an assembled
+    `PromptContext`, so the instruction/document boundary cannot be moved by
+    a client.
+  - Optional shared secret `RAG_API_KEY` checked with `hmac.compare_digest` on
+    every route except `/health`; unset means the service runs open.
+  - `service/ingest_wiring.py` composes the ingestion pipeline for the upload
+    endpoint, since `rag.assembly` may not import `ingestion`.
+  - `tests/service/` exercises every route against fakes and a `TestClient` —
+    no database, weights, or network.
+- `app/` is now a standalone Chainlit client of the API: its own `src/`
+  project (`rag_chat` package) with its own `pyproject.toml`, tests, and
+  tooling, and **no dependency on `rag`**. It can be copied into another
+  repository and pointed at a deployed service.
+  - `RagApiClient` (httpx + `httpx-sse`), app-side wire-shape dataclasses,
+    `AppConfig` from `RAG_API_URL` / `RAG_API_KEY` / `RAG_CHAT_TOP_K`.
+  - Demo mode: with no service reachable, or `RAG_CHAT_DEMO=1`, a canned
+    answer streams through the full UI so it can be shown with no backend.
+  - Feedback is stateless — the app posts the record fields, the service
+    appends them; no passage text crosses the wire.
+- `docs/api.md` documenting the wire contract, endpoints, auth, and how to run
+  the two.
+- Architecture test that nothing under `src/rag` imports an entry point
+  (`service/`, `app/`) or a web framework (`fastapi`, `starlette`,
+  `chainlit`).
+- `api` extra in `pyproject.toml` (`fastapi`, `uvicorn`, `sse-starlette`,
+  `python-multipart`); `httpx-sse` added to the `ui` extra; `just serve`.
+
+### Changed
+
+- The chat app no longer composes a `rag` pipeline in-process or bridges async
+  itself — that now lives in `service/`. `rag.assembly` is used by
+  `scripts/query.py`, `scripts/answer.py`, and `service/app.py`.
+- `just type-check` / `just security` and the pytest configuration extended to
+  cover `service/` and `app/`.
+- `docs/architecture.md`, `docs/generation.md`, `docs/retrieval.md`,
+  `docs/future-work.md`, `docs/codebase-cheatsheet.md`, `README.md`, and
+  `CLAUDE.md` updated for the service and the relocated app.
+
 - Phase 1 architecture document (`docs/architecture.md`) covering package
   structure, domain contracts, interfaces, dependency graph, database
   schema, and dependency plan for the RAG package.
