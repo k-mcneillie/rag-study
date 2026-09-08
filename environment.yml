@@ -28,5 +28,9 @@ dependencies:
       # pymupdf4llm is not published on conda-forge; markdown-oriented PDF
       # extraction used by the chunking pipeline.
       - pymupdf4llm>=0.0.17
-      # Install this project in editable mode with its dev extras.
-      - -e .[dev]
+      # The package, editable, with dev tools plus the optional HTTP API
+      # (service/) and chat-UI (app/) dependency sets.
+      - -e .[dev,api,ui]
+      # The chat app is its own project; install it so `rag_chat` imports and
+      # its tests run in `just check-all`.
+      - -e ./app

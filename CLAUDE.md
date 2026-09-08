@@ -8,12 +8,16 @@ context to reason from.
 
 A modular, offline-capable RAG package: PDFs in, ranked and cited context out.
 The retrieval pipeline deliberately stops before calling a language model;
-`rag.generation` is a separate sibling package that answers from that context,
-and a Chainlit interface over both lives in `app/`, outside the package.
+`rag.generation` is a separate sibling package that answers from that context.
+`service/` is an HTTP API over the query side (FastAPI, an entry point like
+`scripts/`), and `app/` is a standalone Chainlit chat client of that API — its
+own `src/` project with its own `pyproject.toml` and no `rag` import, so it can
+be lifted into another repository.
 
 Start with [docs/architecture.md](docs/architecture.md) for how the parts fit
 together and why, [docs/ingestion.md](docs/ingestion.md) and
-[docs/retrieval.md](docs/retrieval.md) for the pipelines, and
+[docs/retrieval.md](docs/retrieval.md) for the pipelines,
+[docs/api.md](docs/api.md) for the HTTP API and the chat app, and
 [docs/future-work.md](docs/future-work.md) for what is deliberately absent.
 
 ## Environment
@@ -45,6 +49,10 @@ one seems to be in the way, the design is wrong, not the rule.
 - **Only `storage` may import SQLAlchemy.** Processing components depend on the
   `Repository` protocol.
 - **`domain` imports nothing third-party.** The contracts stay framework-free.
+- **`src/rag` never imports an entry point or a web framework.** No module
+  under the package may import `service/`, `app/` (`rag_chat`), `fastapi`,
+  `starlette`, or `chainlit`. The package must not depend on what depends on
+  it — this is what keeps `app/` liftable and `service/` deletable.
 
 Three further rules are not automated but matter as much:
 

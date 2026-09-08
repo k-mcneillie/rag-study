@@ -54,9 +54,19 @@ src/rag/
     ├── ollama.py           OllamaChatModel
     └── openai_compatible.py    OpenAICompatibleChatModel
 
-app/main.py                Chainlit chat interface, outside the package
+service/                   the HTTP API over the query side, an entry point like scripts/
+├── app.py                 create_app(); lifespan builds the pipeline via rag.assembly
+├── routes.py              GET /health, POST /answer (SSE), /feedback, /documents
+├── schemas.py             the pydantic wire contract
+├── streaming.py           AnswerDelta generator → server-sent events
+├── security.py            optional X-API-Key check (RAG_API_KEY)
+└── ingest_wiring.py       ingestion pipeline for /documents (rag.assembly can't import ingestion)
+
+app/                       standalone Chainlit client of the API; no rag import; its own pyproject
+└── src/rag_chat/          main.py (Chainlit), client.py (httpx), models.py, demo.py, config.py
+
 scripts/                   ingest.py, query.py, answer.py, create_schema.py
-tests/                     unit, integration (marked), architecture
+tests/                     unit, integration (marked), architecture; tests/service/ covers the API
 ```
 
 ### Package roles
@@ -85,12 +95,15 @@ same thing, it becomes a leaf module rather than an import between them.
 | `python scripts/query.py "<q>" [--top-k N] [--document-id ID] [--show-prompt]` | retrieve and print context; no model called |
 | `python scripts/answer.py "<q>" [--top-k N] [--document-id ID] [--show-prompt] [--show-reasoning]` | retrieve and answer from a model service |
 | `python scripts/create_schema.py` | create the schema / report drift (needs `RAG_ADMIN_DB_URL`) |
-| `chainlit run app/main.py` / `just ui` | the chat interface at `http://localhost:8000` |
+| `just serve` | the HTTP API at `http://localhost:8080` (`uvicorn service.app:create_app --factory`) |
+| `just ui` | the chat interface at `http://localhost:8000` (`chainlit run app/src/rag_chat/main.py`; needs `pip install -e app/`) |
 | `just ask "<q>"` | `scripts/answer.py` without a browser |
 
-`scripts/query.py`, `scripts/answer.py`, and `app/main.py` compose the pipeline
-through `rag.assembly`. `scripts/ingest.py` has its own `build_orchestrator`,
-because ingestion is not part of the query-side composition root.
+`scripts/query.py`, `scripts/answer.py`, and `service/app.py` compose the
+query pipeline through `rag.assembly`. `scripts/ingest.py` and
+`service/ingest_wiring.py` each have their own ingestion wiring, because
+ingestion is not part of the query-side composition root. `app/` composes
+nothing — it is an HTTP client of `service/`.
 
 ## Running the checks
 
@@ -104,9 +117,9 @@ HF_HUB_OFFLINE=1 pytest        # proves nothing reaches the network
 ```
 
 Individual gates: `just lint`, `just format-check`, `just type-check`
-(`mypy src/ app/ scripts/`), `just security` (bandit), `just test`.
-Integration tests need MariaDB running and the model weights present; they skip
-rather than fail otherwise.
+(`mypy src/ service/ app/src/ app/tests/ scripts/`), `just security` (bandit),
+`just test`. Integration tests need MariaDB running and the model weights
+present; they skip rather than fail otherwise.
 
 ## Where to make a change
 
@@ -117,7 +130,13 @@ composition. Nothing downstream changes.
 New document format
     → subclass BaseExtractor (rag/ingestion/interfaces.py)
     → inject into IngestionOrchestrator in scripts/ingest.py:build_orchestrator
+      and service/ingest_wiring.py:build_ingestion_orchestrator
     → no chunking, embedding, storage, retrieval, or generation change
+
+New API endpoint
+    → add a route in service/routes.py, a shape in service/schemas.py
+    → depend on _KEYED unless it is a health/liveness check
+    → the app in app/ is a separate client; add the call in app/src/rag_chat/client.py
 
 New chunking strategy
     → subclass BaseChunker
@@ -172,18 +191,22 @@ lives in `rag/storage/orm.py`.
 | `tests/ingestion/` | extraction, cleaning, chunking, semantic chunking, the orchestrator |
 | `tests/retrieval/` | ranking, reranking, prompt assembly and its boundary |
 | `tests/generation/` | the two clients, provider selection |
+| `tests/service/` | the API routes, against fakes and a `TestClient`; no DB, no weights |
 | `tests/integration/` | real MariaDB, real weights (marked `integration`) |
+| `app/tests/` | the chat app's client, demo stream, and Chainlit-loader smoke test |
 
-`pyproject.toml` sets `pythonpath = ["src"]` and the `integration` marker. CI
-runs `pytest -m "not integration" --cov-fail-under=85` and, separately,
+`pyproject.toml` sets `pythonpath = ["src", ".", "app/src"]`, collects
+`tests` and `app/tests`, and defines the `integration` marker. CI runs
+`pytest -m "not integration"` and, separately,
 `pytest tests/test_architecture.py --no-cov`.
 
 ## Configuration files
 
 | File | Holds |
 |---|---|
-| `.env.example` | every recognised `RAG_*` variable, with prose |
-| `pyproject.toml` | dependencies, ruff / mypy / bandit / pytest / coverage config |
-| `environment.yml` | the conda environment; installs the package with `-e .[dev]` |
-| `justfile` | the check and run recipes |
+| `.env.example` | every recognised `RAG_*` variable, with prose (including `RAG_API_*`) |
+| `pyproject.toml` | the package; deps (`api`, `ui` extras), ruff / mypy / bandit / pytest / coverage |
+| `app/pyproject.toml` | the chat app as its own project — deps and mirrored ruff / mypy config |
+| `environment.yml` | the conda environment; installs `-e .[dev,api,ui]` and `-e ./app` |
+| `justfile` | the check and run recipes (`serve`, `ui`, …) |
 | `.github/workflows/ci.yml` | the CI job |

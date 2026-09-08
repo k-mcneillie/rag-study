@@ -48,14 +48,26 @@ Issues = "https://github.com/k-mcneillie/rag-study/issues"
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=5.0.0",
+    "pytest-asyncio>=0.23.0",
     "ruff>=0.6.0",
     "mypy>=1.11.0",
     "bandit[toml]>=1.7.9",
 ]
-# The chat interface. Kept optional: the package retrieves, and is tested,
-# without it, and nothing under src/ imports it.
+# The HTTP API in front of the pipelines (service/). Kept optional: the
+# package retrieves, and is tested, without it, and nothing under src/ imports
+# it. The service is an entry point, like scripts/, not part of the package.
+api = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sse-starlette>=2.1.0",
+    "python-multipart>=0.0.9",
+]
+# The chat interface (app/). Also an entry point outside the package; it has
+# its own pyproject.toml so it can be lifted into another repository. These
+# are duplicated here only so `just check-all` can lint and type-check app/.
 ui = [
     "chainlit>=2.0.0",
+    "httpx-sse>=0.4.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -66,9 +78,14 @@ where = ["src"]
 "rag.retrieval.prompts" = ["*.txt"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
+# "tests" is the package suite; "app/tests" is the chat app's own suite, which
+# lives beside the app so it travels when the app is copied out.
+testpaths = ["tests", "app/tests"]
+# "src" for the package; "." so tests/service/ can import the service entry
+# point (service/); "app/src" so app/tests/ can import the app package.
+pythonpath = ["src", ".", "app/src"]
 addopts = "-ra --strict-markers --cov=src --cov-report=term-missing --cov-report=xml"
+asyncio_mode = "auto"
 markers = [
     "integration: tests requiring a live MariaDB server (deselect with '-m \"not integration\"')",
 ]
@@ -95,7 +112,12 @@ strict_equality = true
 
 [[tool.mypy.overrides]]
 # These ship no type information of their own.
-module = ["pymupdf4llm.*", "sentence_transformers.*", "chainlit.*"]
+module = [
+    "pymupdf4llm.*",
+    "sentence_transformers.*",
+    "chainlit.*",
+    "sse_starlette.*",
+]
 ignore_missing_imports = true
 
 [tool.bandit]
