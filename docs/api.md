@@ -140,9 +140,36 @@ section, and score — location, not text. `no_context` becomes a plain "nothing
 matched" message; `error` becomes "**No answer.** …". The rating buttons `POST
 /feedback`; in demo mode they show a toast and write nothing.
 
+## A second client: the OpenAI dialect (`app-openai/`)
+
+`app-openai/` is a sibling of `app/` — the same Chainlit UI — written against a
+different wire contract. Instead of this repo's `service/` and its named SSE
+events, it speaks the **OpenAI wire language** to a hosted RAG provider:
+
+- `POST /v1/chat/completions` with `stream: true`, an SSE loop over
+  `data: {chunk}` … `data: [DONE]`; `Authorization: Bearer`; `GET /v1/models`
+  for the banner.
+- The provider owns its index and does retrieval internally — the client sends
+  only the question, and never receives an assembled prompt (the same trust
+  boundary as `service/`).
+- Citations ride as a `citations` vendor extension on the stream, carrying
+  `{position, document_id, page_number, section, score}`; reasoning as the
+  `reasoning_content` delta field or inline `<think>` tags.
+- `POST /v1/files` for ingestion; an optional `RAG_OPENAI_FEEDBACK_URL` for the
+  rating buttons (empty stores nothing).
+
+Its `client.py` owns a `_StreamDecoder` that turns one `chat.completion.chunk`
+into the same internal event union `app/` uses; the live stream and the offline
+demo (`RAG_OPENAI_DEMO=1`) both run through it, and an "OpenAI wire trace" step
+shows the raw chunks. Configuration is `RAG_OPENAI_BASE_URL` / `_API_KEY` /
+`_MODEL` / `_VECTOR_STORE` / `_TOP_K` / `_FEEDBACK_URL` / `_TRACE` / `_DEMO`.
+Run it with `just ui-openai`. Its design notes are in
+[`app-openai/docs/design.md`](../app-openai/docs/design.md).
+
 ## Tests
 
 `tests/service/` exercises every route against fake collaborators and a
 `TestClient` — no database, no weights, no network. `app/tests/` covers the
 client's SSE parsing, the demo stream, and that `main.py` loads under Chainlit's
-module loader. Both run in `just check-all`.
+module loader. `app-openai/tests/` does the same for the OpenAI-dialect decoder.
+All run in `just check-all`.

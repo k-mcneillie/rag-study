@@ -38,9 +38,12 @@ It does not call a language model.
 Answering is provided by a separate package, `rag.generation`, which consumes
 the retrieval output from outside. An HTTP API over the query side lives in
 `service/`, and a chat interface that talks only to that API lives in `app/` —
-both outside the package entirely, both entry points like `scripts/`. All of
-it is optional: retrieval works, and is tested, with no model service
-configured, the API not run, and the interface not installed.
+both outside the package entirely, both entry points like `scripts/`. A second
+chat interface, `app-openai/`, is the same client written against the OpenAI
+wire language (`POST /v1/chat/completions` streaming) for a hosted RAG provider
+instead of this repo's `service/`; see [api.md](api.md). All of it is optional:
+retrieval works, and is tested, with no model service configured, the API not
+run, and neither interface installed.
 
 The prompt is built and consumed entirely inside the service. No endpoint
 returns an assembled `PromptContext` to a caller, so the boundary between

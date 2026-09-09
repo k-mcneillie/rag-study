@@ -178,12 +178,20 @@ def test_domain_contracts_are_free_of_frameworks() -> None:
 def test_the_package_never_imports_an_entry_point_or_a_web_framework() -> None:
     """The package does not depend on the things that depend on it.
 
-    The API service (``service/``) and the chat app (``app/``) compose the
-    package; the package must not reach back into them, and it must not import
-    the web frameworks they are built on. This is what lets either be deleted,
-    or lifted into another repository, without touching ``src/rag``.
+    The API service (``service/``) and the chat apps (``app/``,
+    ``app-openai/``) compose the package; the package must not reach back into
+    them, and it must not import the web frameworks they are built on. This is
+    what lets any of them be deleted, or lifted into another repository,
+    without touching ``src/rag``.
     """
-    forbidden_roots = {"service", "rag_chat", "fastapi", "starlette", "chainlit"}
+    forbidden_roots = {
+        "service",
+        "rag_chat",
+        "rag_chat_openai",
+        "fastapi",
+        "starlette",
+        "chainlit",
+    }
 
     for source in sorted(PACKAGE_ROOT.rglob("*.py")):
         tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))

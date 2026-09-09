@@ -78,12 +78,14 @@ where = ["src"]
 "rag.retrieval.prompts" = ["*.txt"]
 
 [tool.pytest.ini_options]
-# "tests" is the package suite; "app/tests" is the chat app's own suite, which
-# lives beside the app so it travels when the app is copied out.
-testpaths = ["tests", "app/tests"]
+# "tests" is the package suite; "app/tests" and "app-openai/tests" are the two
+# chat apps' own suites, which live beside each app so they travel when it is
+# copied out.
+testpaths = ["tests", "app/tests", "app-openai/tests"]
 # "src" for the package; "." so tests/service/ can import the service entry
-# point (service/); "app/src" so app/tests/ can import the app package.
-pythonpath = ["src", ".", "app/src"]
+# point (service/); "app/src" and "app-openai/src" so each app's tests can
+# import its package.
+pythonpath = ["src", ".", "app/src", "app-openai/src"]
 addopts = "-ra --strict-markers --cov=src --cov-report=term-missing --cov-report=xml"
 asyncio_mode = "auto"
 markers = [

@@ -33,6 +33,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     answer streams through the full UI so it can be shown with no backend.
   - Feedback is stateless — the app posts the record fields, the service
     appends them; no passage text crosses the wire.
+- `app-openai/` is a second standalone Chainlit client — a sibling of `app/`
+  with the same UI — for a RAG provider that speaks the **OpenAI wire
+  language** (`POST /v1/chat/completions` streaming, `Authorization: Bearer`,
+  `GET /v1/models`). Its own `src/` project (`rag_chat_openai` package),
+  `pyproject.toml`, tests and tooling; no dependency on `rag` or on `app/`.
+  - `OpenAIRagClient` (httpx + `httpx-sse`) and `_StreamDecoder`, which turns
+    one `chat.completion.chunk` into the app's `StreamEvent` union. The live
+    stream and the offline demo both run through the decoder, so demo mode
+    exercises the real wire translation.
+  - Retrieval stays server-side: the provider owns its index and retrieves
+    internally; the client sends only the question. Citations ride as a
+    `citations` vendor extension on the stream, carrying
+    `{position, document_id, page_number, section, score}`.
+  - Demo mode (`RAG_OPENAI_DEMO=1`, or no provider reachable) streams canned
+    `chat.completion.chunk` payloads through the decoder, and an "OpenAI wire
+    trace" step shows the raw chunks. `RAG_OPENAI_TRACE=1` shows it for live
+    answers too.
+  - Configured from `RAG_OPENAI_BASE_URL` / `_API_KEY` / `_MODEL` /
+    `_VECTOR_STORE` / `_TOP_K` / `_FEEDBACK_URL` / `_TRACE` / `_DEMO`. A
+    file-upload affordance for ingestion is the one intentional UI addition
+    over `app/`. `just ui-openai` runs it.
 - `docs/api.md` documenting the wire contract, endpoints, auth, and how to run
   the two.
 - Architecture test that nothing under `src/rag` imports an entry point
@@ -47,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   itself — that now lives in `service/`. `rag.assembly` is used by
   `scripts/query.py`, `scripts/answer.py`, and `service/app.py`.
 - `just type-check` / `just security` and the pytest configuration extended to
-  cover `service/` and `app/`.
+  cover `service/`, `app/`, and `app-openai/`.
 - `docs/architecture.md`, `docs/generation.md`, `docs/retrieval.md`,
   `docs/future-work.md`, `docs/codebase-cheatsheet.md`, `README.md`, and
   `CLAUDE.md` updated for the service and the relocated app.

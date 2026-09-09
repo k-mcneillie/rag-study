@@ -12,7 +12,10 @@ The retrieval pipeline deliberately stops before calling a language model;
 `service/` is an HTTP API over the query side (FastAPI, an entry point like
 `scripts/`), and `app/` is a standalone Chainlit chat client of that API — its
 own `src/` project with its own `pyproject.toml` and no `rag` import, so it can
-be lifted into another repository.
+be lifted into another repository. `app-openai/` is a second such client, the
+same Chainlit UI written against the OpenAI wire language (`/v1/chat/completions`
+streaming) for a hosted RAG provider instead of `service/`; it is independent of
+both `rag` and `app/`.
 
 Start with [docs/architecture.md](docs/architecture.md) for how the parts fit
 together and why, [docs/ingestion.md](docs/ingestion.md) and
@@ -50,9 +53,10 @@ one seems to be in the way, the design is wrong, not the rule.
   `Repository` protocol.
 - **`domain` imports nothing third-party.** The contracts stay framework-free.
 - **`src/rag` never imports an entry point or a web framework.** No module
-  under the package may import `service/`, `app/` (`rag_chat`), `fastapi`,
-  `starlette`, or `chainlit`. The package must not depend on what depends on
-  it — this is what keeps `app/` liftable and `service/` deletable.
+  under the package may import `service/`, `app/` (`rag_chat`), `app-openai/`
+  (`rag_chat_openai`), `fastapi`, `starlette`, or `chainlit`. The package must
+  not depend on what depends on it — this is what keeps the apps liftable and
+  `service/` deletable.
 
 Three further rules are not automated but matter as much:
 
