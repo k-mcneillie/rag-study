@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 
 #: The two passages the canned answer "cites", as the provider's ``citations``
 #: vendor extension would carry them.
-_DEMO_CITATIONS = [
+_DEMO_CITATIONS: list[dict[str, object]] = [
     {
         "position": 1,
         "document_id": "demo-0000-0000-0000",
@@ -39,27 +39,31 @@ _REASONING_FRAGMENTS = (
 )
 
 
-def _chunk(delta: dict[str, object], **extra: object) -> str:
+def _chunk(
+    delta: dict[str, object],
+    *,
+    citations: list[dict[str, object]] | None = None,
+    finish_reason: str | None = None,
+) -> str:
     """Render one ``chat.completion.chunk`` as its ``data:`` payload text.
 
     Args:
         delta: The ``choices[0].delta`` object for this chunk.
-        **extra: Extra top-level keys (``citations``, ``finish_reason`` via a
-            nested choice is handled separately, ``model``).
+        citations: The ``citations`` vendor-extension array, on the one chunk
+            that carries it (top level, as the provider contract puts it).
+        finish_reason: The choice's ``finish_reason``, on the terminal chunk.
 
     Returns:
         A compact JSON string, exactly what a provider would put after
         ``data:``.
     """
-    choice: dict[str, object] = {"index": 0, "delta": delta, "finish_reason": None}
-    if "finish_reason" in extra:
-        choice["finish_reason"] = extra.pop("finish_reason")
     body: dict[str, object] = {
         "object": "chat.completion.chunk",
         "model": "demo",
-        "choices": [choice],
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
     }
-    body.update(extra)
+    if citations is not None:
+        body["citations"] = citations
     return json.dumps(body)
 
 

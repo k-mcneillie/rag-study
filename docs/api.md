@@ -144,7 +144,9 @@ matched" message; `error` becomes "**No answer.** …". The rating buttons `POST
 
 `app-openai/` is a sibling of `app/` — the same Chainlit UI — written against a
 different wire contract. Instead of this repo's `service/` and its named SSE
-events, it speaks the **OpenAI wire language** to a hosted RAG provider:
+events, it speaks the **OpenAI wire language** to a local OpenAI-compatible RAG
+provider (vLLM, llama.cpp, LM Studio, or a local RAG service on top of one) —
+not the hosted OpenAI platform:
 
 - `POST /v1/chat/completions` with `stream: true`, an SSE loop over
   `data: {chunk}` … `data: [DONE]`; `Authorization: Bearer`; `GET /v1/models`
@@ -154,16 +156,16 @@ events, it speaks the **OpenAI wire language** to a hosted RAG provider:
   boundary as `service/`).
 - Citations ride as a `citations` vendor extension on the stream, carrying
   `{position, document_id, page_number, section, score}`; reasoning as the
-  `reasoning_content` delta field or inline `<think>` tags.
+  `reasoning_content` delta field.
 - `POST /v1/files` for ingestion; an optional `RAG_OPENAI_FEEDBACK_URL` for the
   rating buttons (empty stores nothing).
 
 Its `client.py` owns a `_StreamDecoder` that turns one `chat.completion.chunk`
-into the same internal event union `app/` uses; the live stream and the offline
-demo (`RAG_OPENAI_DEMO=1`) both run through it, and an "OpenAI wire trace" step
-shows the raw chunks. Configuration is `RAG_OPENAI_BASE_URL` / `_API_KEY` /
-`_MODEL` / `_VECTOR_STORE` / `_TOP_K` / `_FEEDBACK_URL` / `_TRACE` / `_DEMO`.
-Run it with `just ui-openai`. Its design notes are in
+into a small internal `Event` type; the live stream and the offline demo
+(`RAG_OPENAI_DEMO=1`) both run through it, and in demo mode an "OpenAI wire
+trace" step shows the raw chunks. Configuration is `RAG_OPENAI_BASE_URL` /
+`_API_KEY` / `_MODEL` / `_FEEDBACK_URL` / `_DEMO`. Run it with `just ui-openai`.
+Its design notes are in
 [`app-openai/docs/design.md`](../app-openai/docs/design.md).
 
 ## Tests

@@ -7,9 +7,9 @@ OpenAI wire dialect and has no dependency on the ``rag`` package: the whole
 provider.
 
 It is the sibling of ``app/`` — same Chainlit UI, same streaming, reasoning
-step, citation panels and rating buttons — differing only in the wire language
-it speaks. The one addition over ``app/`` is a file-upload affordance, so
-ingestion can be shown; ``app/`` could adopt it too.
+step, citation panels and rating buttons — differing in the wire language it
+speaks and, deliberately, in being a little leaner internally. The one UI
+addition over ``app/`` is a file-upload affordance, so ingestion can be shown.
 
 Run it with::
 
@@ -17,7 +17,7 @@ Run it with::
 
 With no provider reachable — or with ``RAG_OPENAI_DEMO`` set — it starts in demo
 mode: a canned OpenAI-shaped chunk stream is decoded through the real client, so
-the interface (including the "OpenAI wire trace" element) can be shown without a
+the interface (including the "OpenAI wire trace" step) can be shown without a
 backend. Ratings are not recorded in that mode.
 """
 
@@ -41,17 +41,7 @@ from rag_chat_openai.client import (
 )
 from rag_chat_openai.config import AppConfig
 from rag_chat_openai.demo import demo_lines
-from rag_chat_openai.models import (
-    Citation,
-    CitationsEvent,
-    DeltaEvent,
-    DoneEvent,
-    ErrorEvent,
-    HealthInfo,
-    NoContextEvent,
-    PromptId,
-    StreamEvent,
-)
+from rag_chat_openai.models import Citation, Event
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +70,10 @@ class _Turn:
         query: The question that was asked.
         answer: The answer text that was produced.
         model_name: The model that produced it.
-        prompt: The prompt template that built its context, when the provider
-            reports one.
         citations: Provenance of the passages the answer was given.
     """
 
-    __slots__ = ("answer", "citations", "message", "model_name", "prompt", "query")
+    __slots__ = ("answer", "citations", "message", "model_name", "query")
 
     def __init__(
         self,
@@ -94,7 +82,6 @@ class _Turn:
         query: str,
         answer: str,
         model_name: str,
-        prompt: PromptId | None,
         citations: tuple[Citation, ...],
     ) -> None:
         """Record one answered question.
@@ -104,14 +91,12 @@ class _Turn:
             query: The question that was asked.
             answer: The answer text that was produced.
             model_name: The model that produced it.
-            prompt: The prompt template that built its context, or ``None``.
             citations: Provenance of the passages the answer was given.
         """
         self.message = message
         self.query = query
         self.answer = answer
         self.model_name = model_name
-        self.prompt = prompt
         self.citations = citations
 
 
@@ -127,8 +112,6 @@ async def start() -> None:
         config.base_url,
         config.api_key,
         model=config.model,
-        vector_store=config.vector_store,
-        top_k=config.top_k,
         feedback_url=config.feedback_url,
     )
     cl.user_session.set(_CONFIG, config)
@@ -136,12 +119,12 @@ async def start() -> None:
     cl.user_session.set(_TURNS, {})
 
     reason: str | None = None
-    health = None
+    model_name: str | None = None
     if config.demo:
         reason = "`RAG_OPENAI_DEMO` is set"
     else:
         try:
-            health = await client.models()
+            model_name = await client.models()
         except httpx.HTTPStatusError as exc:
             reason = (
                 f"the provider at `{config.base_url}` returned HTTP "
@@ -150,7 +133,7 @@ async def start() -> None:
         except httpx.HTTPError:
             reason = f"the provider at `{config.base_url}` is unreachable"
 
-    if reason is not None or health is None:
+    if reason is not None or model_name is None:
         cl.user_session.set(_DEMO, True)
         await cl.Message(
             content=(
@@ -164,27 +147,20 @@ async def start() -> None:
         return
 
     cl.user_session.set(_DEMO, False)
-    await cl.Message(content=_ready_banner(health)).send()
+    await cl.Message(content=_ready_banner(model_name)).send()
 
 
-def _ready_banner(health: HealthInfo) -> str:
-    """Compose the startup banner from whatever the provider reported.
+def _ready_banner(model_name: str) -> str:
+    """Compose the startup banner.
 
     Args:
-        health: The health report from ``models``.
+        model_name: The model the provider will answer with.
 
     Returns:
-        The banner text. Detail beyond the model name appears only when the
-        provider supplied it.
+        The banner text.
     """
-    bits = [f"Answering with **{health.model}**"]
-    if health.top_k is not None:
-        bits.append(f"over **{health.top_k}** passages")
-    if health.reranker:
-        bits.append(f"({health.reranker})")
-    prompt_note = f" using prompt `{health.prompt}`" if health.prompt else ""
     return (
-        f"Ready. {' '.join(bits)}{prompt_note}.\n\n"
+        f"Ready. Answering with **{model_name}**.\n\n"
         "Answers are drawn only from the provider's indexed documents. Rate "
         "them with the buttons underneath — the ratings are what will "
         "eventually let retrieval quality be measured rather than assumed."
@@ -210,8 +186,7 @@ async def answer(message: cl.Message) -> None:
         message: The question the reader asked, or a document to ingest.
     """
     client: OpenAIRagClient | None = cl.user_session.get(_CLIENT)
-    config: AppConfig | None = cl.user_session.get(_CONFIG)
-    if client is None or config is None:
+    if client is None:
         await cl.Message(content="The interface did not start; see above.").send()
         return
 
@@ -225,22 +200,20 @@ async def answer(message: cl.Message) -> None:
         return
 
     query = message.content.strip()
-    if cl.user_session.get(_DEMO):
-        decoder = _StreamDecoder()
-        source: AsyncIterator[StreamEvent] = decode_lines(demo_lines(query), decoder)
+    demo = bool(cl.user_session.get(_DEMO))
+    decoder = _StreamDecoder()
+    if demo:
+        source: AsyncIterator[Event] = decode_lines(demo_lines(query), decoder)
     else:
-        source, decoder = client.answer_stream(query)
+        source = client.answer_stream(query, decoder)
 
-    streamed = await _stream_answer(source)
-    if config.demo or config.trace:
+    state = await _stream_answer(source)
+    if demo:
         await _render_trace(decoder)
-    if streamed is None:
+    if state is None:
         return
 
-    reply, answer_text, done, citations = streamed
-    await _offer_rating(
-        reply, query=query, answer=answer_text, done=done, citations=citations
-    )
+    await _offer_rating(state, query=query)
 
 
 async def _handle_uploads(client: OpenAIRagClient, uploads: list[cl.Element]) -> None:
@@ -305,6 +278,8 @@ class _StreamState:
     until the first answer fragment arrives, so it cannot be timestamped
     earlier than the reasoning it followed. Both are lazy, so a model that
     does not reason leaves no empty step behind.
+
+    Hand-written rather than a dataclass for the same reason as :class:`_Turn`.
     """
 
     __slots__ = (
@@ -312,6 +287,7 @@ class _StreamState:
         "citations",
         "done",
         "elements",
+        "model_name",
         "reasoning",
         "reasoning_step",
         "reply",
@@ -325,7 +301,13 @@ class _StreamState:
         self.reply: cl.Message | None = None
         self.reasoning_step: cl.Step | None = None
         self.reasoning = AsyncExitStack()
-        self.done: DoneEvent | None = None
+        self.done = False
+        self.model_name = "unknown"
+
+    @property
+    def answer_text(self) -> str:
+        """The answer text streamed so far, joined."""
+        return "".join(self.answer_parts)
 
     async def add_reasoning(self, text: str) -> None:
         """Stream a reasoning fragment into a lazily created step.
@@ -353,84 +335,47 @@ class _StreamState:
         await self.reply.stream_token(text)
 
 
-async def _terminal_message(event: NoContextEvent | ErrorEvent) -> None:
-    """Show the message for a stream that ended without an answer.
-
-    Args:
-        event: The ``no_context`` or ``error`` event that ended the stream.
-    """
-    if isinstance(event, NoContextEvent):
-        await cl.Message(
-            content=(
-                "Nothing in the provider's indexed documents matches that "
-                "question, so the model was not asked. An answer with no "
-                "sources would be a guess."
-            )
-        ).send()
-    else:
-        await cl.Message(content=f"**No answer.** {event.message}").send()
-
-
-async def _consume(source: AsyncIterator[StreamEvent], state: _StreamState) -> bool:
-    """Drive the stream into ``state`` until it ends.
-
-    Args:
-        source: The stream of events from the client or the demo decoder.
-        state: The state to accumulate into.
-
-    Returns:
-        ``True`` if the stream produced an answer, ``False`` if it ended on a
-        ``no_context`` or ``error`` event (whose message has been shown).
-    """
-    async for event in source:
-        match event:
-            case CitationsEvent():
-                state.citations = event.items
-                state.elements = _source_elements(event.items)
-            case DeltaEvent(reasoning=True):
-                await state.add_reasoning(event.text)
-            case DeltaEvent():
-                await state.add_answer(event.text)
-            case DoneEvent():
-                state.done = event
-            case _:
-                await state.reasoning.aclose()
-                await _terminal_message(event)
-                return False
-    return True
-
-
-async def _stream_answer(
-    source: AsyncIterator[StreamEvent],
-) -> tuple[cl.Message, str, DoneEvent, tuple[Citation, ...]] | None:
+async def _stream_answer(source: AsyncIterator[Event]) -> _StreamState | None:
     """Stream one answer into the UI, reasoning apart from the answer.
 
     Args:
-        source: The stream of events from the client or the demo decoder.
+        source: The decoded event stream, from the client or the demo decoder.
 
     Returns:
-        The message the answer was streamed into, the answer text, the
-        ``done`` event, and the citations — or ``None`` when there was no
-        answer to rate and the reason has already been shown to the reader.
+        The accumulated stream state when there is an answer to rate, or
+        ``None`` when the stream ended without one — the reason has already been
+        shown to the reader.
     """
     state = _StreamState()
     try:
-        produced = await _consume(source, state)
+        async for event in source:
+            if event.kind == "citations":
+                state.citations = event.citations
+                state.elements = _source_elements(event.citations)
+            elif event.kind == "reasoning":
+                await state.add_reasoning(event.text)
+            elif event.kind == "answer":
+                await state.add_answer(event.text)
+            elif event.kind == "done":
+                state.model_name = event.text
+                state.done = True
+            else:  # "error"
+                await state.reasoning.aclose()
+                await cl.Message(content=f"**No answer.** {event.text}").send()
+                return None
     except ApiError as exc:
         await cl.Message(content=f"That question was rejected: {exc}").send()
         return None
     except httpx.HTTPError:
         logger.exception("The answer stream failed.")
         await cl.Message(
-            content=("The connection to the provider failed. Check that it is running.")
+            content="The connection to the provider failed. Check that it is running."
         ).send()
         return None
     finally:
         await state.reasoning.aclose()
 
-    if not produced:
-        return None
-    if state.done is None:
+    if not state.done:
         await cl.Message(
             content="The provider ended the stream without finishing the answer."
         ).send()
@@ -443,7 +388,7 @@ async def _stream_answer(
             ),
             elements=state.elements,
         )
-    return state.reply, "".join(state.answer_parts), state.done, state.citations
+    return state
 
 
 def _source_elements(citations: tuple[Citation, ...]) -> list[cl.Text]:
@@ -477,26 +422,20 @@ def _source_elements(citations: tuple[Citation, ...]) -> list[cl.Text]:
     return elements
 
 
-async def _offer_rating(
-    reply: cl.Message,
-    *,
-    query: str,
-    answer: str,
-    done: DoneEvent,
-    citations: tuple[Citation, ...],
-) -> None:
+async def _offer_rating(state: _StreamState, *, query: str) -> None:
     """Close the streamed answer and attach the rating buttons.
 
     One ``send`` ends the stream and delivers the citations and buttons
     together, so the answer is never briefly readable without its sources.
 
     Args:
-        reply: The answer message being rated.
+        state: The finished stream state. ``_stream_answer`` guarantees
+            ``state.reply`` is set on a non-``None`` return.
         query: The question that was asked.
-        answer: The answer text that was produced.
-        done: The stream's ``done`` event, carrying the model and prompt id.
-        citations: Provenance of the passages the answer was given.
     """
+    reply = state.reply
+    if reply is None:  # unreachable after _stream_answer; keeps the type-checker honest
+        return
     reply.actions = [
         cl.Action(
             name="vote_up",
@@ -519,10 +458,9 @@ async def _offer_rating(
     turns[reply.id] = _Turn(
         message=reply,
         query=query,
-        answer=answer,
-        model_name=done.model_name,
-        prompt=done.prompt,
-        citations=citations,
+        answer=state.answer_text,
+        model_name=state.model_name,
+        citations=state.citations,
     )
     cl.user_session.set(_TURNS, turns)
 
@@ -554,7 +492,6 @@ async def _record(action: cl.Action, vote: str) -> None:
                 query=turn.query,
                 answer=turn.answer,
                 model_name=turn.model_name,
-                prompt=turn.prompt,
                 citations=turn.citations,
             )
         except httpx.HTTPError:

@@ -34,26 +34,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Feedback is stateless — the app posts the record fields, the service
     appends them; no passage text crosses the wire.
 - `app-openai/` is a second standalone Chainlit client — a sibling of `app/`
-  with the same UI — for a RAG provider that speaks the **OpenAI wire
-  language** (`POST /v1/chat/completions` streaming, `Authorization: Bearer`,
-  `GET /v1/models`). Its own `src/` project (`rag_chat_openai` package),
-  `pyproject.toml`, tests and tooling; no dependency on `rag` or on `app/`.
+  with the same UI — for a **local** OpenAI-compatible RAG provider (vLLM,
+  llama.cpp, LM Studio, Ollama's `/v1`, or a local RAG service on one of them),
+  speaking the **OpenAI wire language** (`POST /v1/chat/completions` streaming,
+  `Authorization: Bearer`, `GET /v1/models`). Its own `src/` project
+  (`rag_chat_openai` package), `pyproject.toml`, tests and tooling; no
+  dependency on `rag` or on `app/`.
   - `OpenAIRagClient` (httpx + `httpx-sse`) and `_StreamDecoder`, which turns
-    one `chat.completion.chunk` into the app's `StreamEvent` union. The live
+    one `chat.completion.chunk` into a small internal `Event` type. The live
     stream and the offline demo both run through the decoder, so demo mode
     exercises the real wire translation.
   - Retrieval stays server-side: the provider owns its index and retrieves
-    internally; the client sends only the question. Citations ride as a
-    `citations` vendor extension on the stream, carrying
-    `{position, document_id, page_number, section, score}`.
+    internally; the client sends only the question, so the request body is just
+    `model` / `messages` / `stream`. Citations ride as a `citations` vendor
+    extension on the stream, carrying
+    `{position, document_id, page_number, section, score}`; reasoning as the
+    `reasoning_content` delta field.
   - Demo mode (`RAG_OPENAI_DEMO=1`, or no provider reachable) streams canned
     `chat.completion.chunk` payloads through the decoder, and an "OpenAI wire
-    trace" step shows the raw chunks. `RAG_OPENAI_TRACE=1` shows it for live
-    answers too.
+    trace" step shows the raw chunks.
   - Configured from `RAG_OPENAI_BASE_URL` / `_API_KEY` / `_MODEL` /
-    `_VECTOR_STORE` / `_TOP_K` / `_FEEDBACK_URL` / `_TRACE` / `_DEMO`. A
-    file-upload affordance for ingestion is the one intentional UI addition
-    over `app/`. `just ui-openai` runs it.
+    `_FEEDBACK_URL` / `_DEMO`. Ingestion is `POST /v1/files`, exposed as a
+    file-upload affordance (the one intentional UI addition over `app/`).
+    `just ui-openai` runs it.
 - `docs/api.md` documenting the wire contract, endpoints, auth, and how to run
   the two.
 - Architecture test that nothing under `src/rag` imports an entry point

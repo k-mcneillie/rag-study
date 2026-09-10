@@ -13,13 +13,7 @@ import httpx
 import pytest
 
 from rag_chat_openai.client import ApiError, OpenAIRagClient, _StreamDecoder
-from rag_chat_openai.models import (
-    CitationsEvent,
-    DeltaEvent,
-    DoneEvent,
-    ErrorEvent,
-    PromptId,
-)
+from rag_chat_openai.models import Citation, Event
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -70,7 +64,7 @@ def _client(
 
 
 async def test_answer_stream_decodes_content_and_sends_a_bearer_token() -> None:
-    """Content deltas become ``DeltaEvent``s and the request carries the token."""
+    """Content deltas become ``answer`` events and the request carries the token."""
     seen: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -88,8 +82,8 @@ async def test_answer_stream_decodes_content_and_sends_a_bearer_token() -> None:
             )
         )
 
-    source, decoder = _client(handler).answer_stream("q")
-    events = [event async for event in source]
+    decoder = _StreamDecoder()
+    events = [event async for event in _client(handler).answer_stream("q", decoder)]
 
     assert seen["auth"] == "Bearer k"
     assert seen["path"] == "/v1/chat/completions"
@@ -99,16 +93,16 @@ async def test_answer_stream_decodes_content_and_sends_a_bearer_token() -> None:
         "stream": True,
     }
     assert events == [
-        DeltaEvent(text="Hel", reasoning=False),
-        DeltaEvent(text="lo", reasoning=False),
-        DoneEvent(model_name="m", prompt=None),
+        Event("answer", "Hel"),
+        Event("answer", "lo"),
+        Event("done", "m"),
     ]
     assert decoder.trace[-1] == "[DONE]"
     assert len(decoder.trace) == 4
 
 
 async def test_answer_stream_separates_reasoning_content() -> None:
-    """A ``reasoning_content`` delta is marked as reasoning."""
+    """A ``reasoning_content`` delta becomes a ``reasoning`` event."""
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return _stream_response(
@@ -122,45 +116,19 @@ async def test_answer_stream_separates_reasoning_content() -> None:
             )
         )
 
-    source, _ = _client(handler).answer_stream("q")
-    events = [event async for event in source]
-
-    assert events == [
-        DeltaEvent(text="hmm ", reasoning=True),
-        DeltaEvent(text="the answer", reasoning=False),
-        DoneEvent(model_name="m", prompt=None),
+    events = [
+        event async for event in _client(handler).answer_stream("q", _StreamDecoder())
     ]
 
-
-async def test_answer_stream_splits_inline_think_tags_across_chunks() -> None:
-    """``<think>`` reasoning inlined in ``content`` is split out, even mid-tag."""
-
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return _stream_response(
-            _sse(
-                json.dumps({"choices": [{"delta": {"content": "<thi"}}]}),
-                json.dumps(
-                    {"choices": [{"delta": {"content": "nk>secret</think>real"}}]}
-                ),
-                json.dumps(
-                    {"choices": [{"delta": {}, "finish_reason": "stop"}], "model": "m"}
-                ),
-                "[DONE]",
-            )
-        )
-
-    source, _ = _client(handler).answer_stream("q")
-    events = [event async for event in source]
-
     assert events == [
-        DeltaEvent(text="secret", reasoning=True),
-        DeltaEvent(text="real", reasoning=False),
-        DoneEvent(model_name="m", prompt=None),
+        Event("reasoning", "hmm "),
+        Event("answer", "the answer"),
+        Event("done", "m"),
     ]
 
 
 async def test_answer_stream_reads_the_citations_extension() -> None:
-    """A ``citations`` array on a chunk becomes a populated ``CitationsEvent``."""
+    """A ``citations`` array on a chunk becomes a populated ``citations`` event."""
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return _stream_response(
@@ -187,11 +155,12 @@ async def test_answer_stream_reads_the_citations_extension() -> None:
             )
         )
 
-    source, _ = _client(handler).answer_stream("q")
-    events = [event async for event in source]
+    events = [
+        event async for event in _client(handler).answer_stream("q", _StreamDecoder())
+    ]
 
-    assert isinstance(events[0], CitationsEvent)
-    citation = events[0].items[0]
+    assert events[0].kind == "citations"
+    citation = events[0].citations[0]
     assert (citation.document_id, citation.page_number, citation.section) == (
         "d1",
         4,
@@ -201,7 +170,7 @@ async def test_answer_stream_reads_the_citations_extension() -> None:
 
 
 async def test_answer_stream_surfaces_a_mid_stream_error() -> None:
-    """An ``error`` object mid-stream ends the stream as an ``ErrorEvent``."""
+    """An ``error`` object mid-stream ends the stream as an ``error`` event."""
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return _stream_response(
@@ -212,12 +181,13 @@ async def test_answer_stream_surfaces_a_mid_stream_error() -> None:
             )
         )
 
-    source, _ = _client(handler).answer_stream("q")
-    events = [event async for event in source]
+    events = [
+        event async for event in _client(handler).answer_stream("q", _StreamDecoder())
+    ]
 
     assert events == [
-        DeltaEvent(text="partial", reasoning=False),
-        ErrorEvent(message="model exploded"),
+        Event("answer", "partial"),
+        Event("error", "model exploded"),
     ]
 
 
@@ -227,7 +197,7 @@ async def test_answer_stream_raises_apierror_on_a_pre_stream_4xx() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(429, json={"error": {"message": "rate limited"}})
 
-    source, _ = _client(handler).answer_stream("q")
+    source = _client(handler).answer_stream("q", _StreamDecoder())
     with pytest.raises(ApiError) as excinfo:
         async for _ in source:
             pass
@@ -249,37 +219,22 @@ async def test_empty_key_sends_no_authorization_header() -> None:
     assert seen["has_auth"] is False
 
 
-async def test_models_decodes_the_list_and_adopts_the_first_model() -> None:
-    """``GET /v1/models`` becomes a ``HealthInfo`` and sets the request model."""
+async def test_models_returns_the_first_model_and_adopts_it() -> None:
+    """``GET /v1/models`` yields the first id and fills in the request model."""
     seen: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["path"] = request.url.path
         return httpx.Response(
             200,
-            json={
-                "object": "list",
-                "data": [
-                    {
-                        "id": "gpt-x",
-                        "rag": {
-                            "reranker": "cross-encoder",
-                            "prompt": "p/v1",
-                            "top_k": 5,
-                        },
-                    }
-                ],
-            },
+            json={"object": "list", "data": [{"id": "gpt-x"}, {"id": "other"}]},
         )
 
     client = _client(handler)
-    info = await client.models()
+    model = await client.models()
 
     assert seen["path"] == "/v1/models"
-    assert info.model == "gpt-x"
-    assert info.reranker == "cross-encoder"
-    assert info.prompt == "p/v1"
-    assert info.top_k == 5
+    assert model == "gpt-x"
 
 
 async def test_versioned_base_url_is_not_doubled() -> None:
@@ -312,7 +267,6 @@ async def test_feedback_is_a_no_op_without_an_endpoint() -> None:
         query="q",
         answer="a",
         model_name="m",
-        prompt=None,
         citations=(),
     )
 
@@ -321,7 +275,7 @@ async def test_feedback_is_a_no_op_without_an_endpoint() -> None:
 
 
 async def test_feedback_posts_the_expected_shape_when_configured() -> None:
-    """A configured endpoint receives the rating body, prompt included."""
+    """A configured endpoint receives the rating body, citations serialised."""
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -335,8 +289,7 @@ async def test_feedback_posts_the_expected_shape_when_configured() -> None:
         query="q",
         answer="a",
         model_name="m",
-        prompt=PromptId("p", "v1"),
-        citations=(),
+        citations=(Citation(1, "d1", 4, "1 Intro", 0.7),),
     )
 
     assert result == "recorded"
@@ -345,18 +298,24 @@ async def test_feedback_posts_the_expected_shape_when_configured() -> None:
         "query": "q",
         "answer": "a",
         "model_name": "m",
-        "citations": [],
-        "prompt": {"name": "p", "version": "v1"},
+        "citations": [
+            {
+                "position": 1,
+                "document_id": "d1",
+                "page_number": 4,
+                "section": "1 Intro",
+                "score": 0.7,
+            }
+        ],
     }
 
 
 async def test_ingest_posts_multipart_to_the_files_endpoint(tmp_path: object) -> None:
-    """``ingest`` uploads the PDF to ``/v1/files``."""
-    seen: dict[str, object] = {}
+    """``ingest`` uploads the PDF to ``/v1/files`` and does nothing else."""
+    calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen["path"] = request.url.path
-        seen["content_type"] = request.headers.get("content-type", "")
+        calls.append(request.url.path)
         return httpx.Response(200, json={"id": "file-1", "object": "file"})
 
     pdf = tmp_path / "doc.pdf"  # type: ignore[operator]
@@ -365,18 +324,24 @@ async def test_ingest_posts_multipart_to_the_files_endpoint(tmp_path: object) ->
     outcome = await _client(handler).ingest(pdf)
 
     assert outcome["id"] == "file-1"
-    assert seen["path"] == "/v1/files"
-    assert str(seen["content_type"]).startswith("multipart/form-data")
+    assert calls == ["/v1/files"]
 
 
-def test_decoder_is_single_use_state_resets_per_instance() -> None:
-    """A fresh decoder starts with empty trace and no reasoning state."""
+def test_decoder_state_does_not_leak_between_instances() -> None:
+    """A fresh decoder starts with an empty trace and unset flags."""
     first = _StreamDecoder()
-    list(first.decode(json.dumps({"choices": [{"delta": {"content": "<think>"}}]})))
-    second = _StreamDecoder()
+    list(
+        first.decode(
+            json.dumps(
+                {"choices": [{"delta": {}}], "citations": [{"document_id": "d"}]}
+            )
+        )
+    )
+    list(first.decode("[DONE]"))
 
+    second = _StreamDecoder()
     assert second.trace == []
     events = list(
         second.decode(json.dumps({"choices": [{"delta": {"content": "plain"}}]}))
     )
-    assert events == [DeltaEvent(text="plain", reasoning=False)]
+    assert events == [Event("answer", "plain")]

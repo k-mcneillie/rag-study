@@ -8,10 +8,10 @@ repository, point it at a provider, and it works.
 
 It is the sibling of [`app/`](../app): the same Chainlit UI — streamed answers,
 a collapsed reasoning step, numbered citation side-panels with page/section/score,
-thumbs up/down rating buttons, offline demo mode — differing only in the wire
-language it speaks. `app/` talks to this repository's own `service/`; this one
-talks to an external OpenAI-language provider that maintains its own index and
-does retrieval internally.
+thumbs up/down rating buttons, offline demo mode — differing in the wire
+language it speaks, and a little leaner inside. `app/` talks to this
+repository's own `service/`; this one talks to a local OpenAI-compatible
+provider that maintains its own index and does retrieval internally.
 
 ## Layout
 
@@ -24,7 +24,7 @@ app-openai/
 ├── src/rag_chat_openai/
 │   ├── main.py               # Chainlit handlers: start, stream, cite, rate, upload
 │   ├── client.py             # OpenAIRagClient + _StreamDecoder — the wire translation
-│   ├── models.py             # the app's internal event model (plain dataclasses)
+│   ├── models.py             # Citation and the decoder's Event type (frozen dataclasses)
 │   ├── demo.py               # canned OpenAI-shaped chunk stream, used with no provider
 │   └── config.py             # AppConfig, read from the environment
 └── tests/                    # pytest suite, travels with the app
@@ -62,10 +62,7 @@ wherever it is launched from; both are safe to commit or ignore.
 | `RAG_OPENAI_BASE_URL`     | `https://api.openai.com`  | Provider root, with or without a trailing `/v1`.              |
 | `RAG_OPENAI_API_KEY`      | *(empty)*                 | Bearer token. Empty for a provider that needs none.          |
 | `RAG_OPENAI_MODEL`        | *(empty)*                 | Model id for the request; empty adopts the first `/v1/models` entry. |
-| `RAG_OPENAI_VECTOR_STORE` | *(empty)*                 | Optional index id, sent only if the provider accepts one.    |
-| `RAG_OPENAI_TOP_K`        | `5`                       | Passage-count hint, sent only if the provider documents one. |
 | `RAG_OPENAI_FEEDBACK_URL` | *(empty)*                 | Endpoint the rating buttons POST to; empty stores nothing.   |
-| `RAG_OPENAI_TRACE`        | *(off)*                   | Show the wire-trace step for live answers (`1`/`true`/`yes`/`on`). |
 | `RAG_OPENAI_DEMO`         | *(off)*                   | Force demo mode (`1`/`true`/`yes`/`on`).                     |
 
 ## Checks

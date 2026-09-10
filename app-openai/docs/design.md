@@ -11,9 +11,11 @@ document covers only what is different.
 
 ## What "the OpenAI language" means
 
-Not a vendor — a wire contract that most LLM servers now clone (vLLM, Ollama's
-`/v1`, LM Studio, llama.cpp's server, OpenAI, Together, Groq, OpenRouter, and
-hosted RAG services built on any of them):
+Not a vendor — a wire contract that most LLM servers now clone. The target here
+is a **local** OpenAI-compatible server (vLLM, Ollama's `/v1`, LM Studio,
+llama.cpp's server) or a local RAG service speaking that dialect — not the
+hosted OpenAI platform, so nothing in this client touches Assistants,
+`/v1/vector_stores`, or hosted `file_search`. The contract it relies on:
 
 - `POST /v1/chat/completions` with `{"model", "messages":[{"role","content"}], "stream": true}`.
 - The response is `text/event-stream`: one unnamed `data: {chunk}` per line,
@@ -32,35 +34,44 @@ otherwise the same program.
 
 The provider **owns its index and retrieves internally through its own
 endpoints**. This client sends only the question; it never receives an assembled
-prompt or raw passage text. That is both best practice for a hosted RAG service
-(OpenAI `file_search`, Azure "on your data", Bedrock `RetrieveAndGenerate` all
-work this way) and the trust boundary this repository documents in
-`docs/architecture.md`: nothing the client is handed lets it re-template the
-prompt.
+prompt or raw passage text. That is both the ordinary shape for a RAG service
+and the trust boundary this repository documents in `docs/architecture.md`:
+nothing the client is handed lets it re-template the prompt. So the chat request
+carries only `model`, `messages` and `stream` — there is no retrieval-config
+knob to add, because the provider is never told how to retrieve.
 
 ### Citations ride as a vendor extension
 
 The OpenAI chat schema has no slot for `{document_id, page_number, section,
-score}`. A RAG provider that speaks OpenAI therefore adds a `citations` array to
-the stream — the same fields `_source_elements` renders — emitted on the first
-chunk, before any answer content. `_StreamDecoder` reads it there. The one thing
-deliberately **not** handled is bare OpenAI `annotations` (`file_citation` /
-`url_citation`) with no `citations` extension: the provider contract commits to
-the extension, and a branch for a shape we were told will not occur is
-complexity for nothing. If a future provider only sends annotations, that is the
-one place to extend `_StreamDecoder._maybe_citations`.
+score}`. The local RAG provider — the one we will build — therefore adds a
+`citations` array to the stream, the same fields `_source_elements` renders,
+emitted on the first chunk before any answer content. `_StreamDecoder`
+tolerates it at the top level or inside `choices[0].delta` until the provider
+pins the shape. Bare OpenAI `annotations` (`file_citation` / `url_citation`)
+are deliberately **not** handled: the provider contract commits to the
+extension. If that ever changes, `_StreamDecoder._decode_chunk` is the one
+place to extend.
+
+### Reasoning comes from `reasoning_content` only
+
+Reasoning is read from the `reasoning_content` delta field (the vLLM / DeepSeek
+spelling; `reasoning` is also accepted). A provider that instead inlines
+reasoning as `<think>` tags in `content` is **not** handled — an earlier
+version split those out, and the code is easy to restore, but it is dead weight
+against a server that separates the field. `_StreamDecoder._decode_chunk` is
+where a `<think>` splitter would go back.
 
 ---
 
 ## One decoder, shared by the live stream and the demo
 
 `client.py` owns `_StreamDecoder`. It turns one `data:` payload into zero or
-more `StreamEvent`s — the app's own event model, identical to `app/`'s — and
-keeps every raw payload in `.trace`.
+more `Event`s — a single frozen dataclass (`kind`, `text`, `citations`), where
+`app/` uses a five-type event union — and keeps every raw payload in `.trace`.
 
 ```
 live:  httpx aconnect_sse ─▶ sse.data ─┐
-                                        ├─▶ _StreamDecoder.decode(data) ─▶ StreamEvent… ─▶ _consume ─▶ UI
+                                        ├─▶ _StreamDecoder.decode(data) ─▶ Event… ─▶ _stream_answer ─▶ UI
 demo:  demo.demo_lines()   ─▶ raw str ─┘        (each payload also appended to .trace)
 ```
 
@@ -69,32 +80,22 @@ uses.** `demo.py` does not hand the UI pre-baked events the way `app/`'s does; i
 emits canned `chat.completion.chunk` JSON — a citations chunk, two
 `reasoning_content` chunks, three `content` chunks, a terminal chunk, then
 `[DONE]` — and the real decoder turns them into the stream the renderer sees. A
-bug in the `<think>` splitter or the citations mapping shows up in the offline
+bug in the reasoning split or the citations mapping shows up in the offline
 demo, not only against a live provider.
 
-`_consume`, `_StreamState`, `_stream_answer`, `_source_elements` and the rating
-callbacks are unchanged from `app/`: they still iterate a `StreamEvent` async
-iterator and do not know or care where the events came from.
+`_StreamState`, `_source_elements` and the rating callbacks carry over from
+`app/`: they iterate an `Event` async iterator and do not care where the events
+came from. `app/`'s separate `_consume` step is folded into `_stream_answer`
+here — one loop instead of two hops.
 
 ### The "OpenAI wire trace" element
 
-After each answer, in demo mode or when `RAG_OPENAI_TRACE=1`, `main.py` renders
-`decoder.trace` in a collapsed `cl.Step` — one pretty-printed
-`chat.completion.chunk` per line, ending with `data: [DONE]`. It makes the demo
-double as a readable specimen of what the provider must send, and gives a live
-session a way to see the raw dialect when a translation looks wrong.
-
----
-
-## The one provider-specific knob
-
-`OpenAIRagClient._retrieval_config()` returns `{}`. A provider that owns its
-index retrieves without being told how, so the chat request carries only
-`model`, `messages` and `stream`. When a concrete provider needs
-`tool_resources` / `vector_store_ids` / a `top_k` hint, this method is the single
-place it goes; the values are already on the client (`RAG_OPENAI_VECTOR_STORE`,
-`RAG_OPENAI_TOP_K`). Isolating it here keeps the rest of the client
-provider-agnostic.
+After each answer, **in demo mode**, `main.py` renders `decoder.trace` in a
+collapsed `cl.Step` — one pretty-printed `chat.completion.chunk` per line,
+ending with `data: [DONE]`. It makes the demo double as a readable specimen of
+what the provider must send. There is no live-answer trace toggle: a prototype
+that needs to inspect a live stream can read the same `decoder.trace` from a
+breakpoint.
 
 ---
 
@@ -102,18 +103,19 @@ provider-agnostic.
 
 | File | Same as `app/`? | Difference |
 |---|---|---|
-| `models.py` | Almost | `DoneEvent.prompt` is `PromptId \| None` (OpenAI has no prompt-template id); `HealthInfo` fields beyond `model` are optional. The `StreamEvent` union is identical. |
-| `client.py` | No | `_StreamDecoder` (OpenAI chunk → `StreamEvent`) replaces `_parse_event` (named event → `StreamEvent`). `Authorization: Bearer` not `X-API-Key`. `GET /v1/models` not `GET /health`. Adds `_retrieval_config`, keeps `ingest` / `feedback` / a standalone `search`. |
-| `demo.py` | No | Emits raw `chat.completion.chunk` payloads for the shared decoder, not `StreamEvent`s directly. |
-| `config.py` | Shape only | `RAG_OPENAI_*` variables: `BASE_URL`, `API_KEY`, `MODEL`, `VECTOR_STORE`, `TOP_K`, `FEEDBACK_URL`, `TRACE`, `DEMO`. |
-| `main.py` | Nearly verbatim | Banner from `models()`; wire-trace step; a file-upload affordance for ingestion (the one intentional UI addition over `app/` — `app/` could adopt it); `done.prompt` and a no-op feedback endpoint tolerated. `_StreamState` and the render path are unchanged. |
+| `models.py` | No | `app/`'s five-type `StreamEvent` dataclass union collapses to one `Event(kind, text, citations)` dataclass, plus `Citation`. No `HealthInfo` (the banner shows only the model name), no prompt-template id (the OpenAI dialect has none). |
+| `client.py` | No | `_StreamDecoder` (OpenAI chunk → `Event`) replaces `_parse_event` (named event → `StreamEvent`). `Authorization: Bearer` not `X-API-Key`. `GET /v1/models` not `GET /health`. Keeps `ingest` (just `POST /v1/files`) and `feedback`. |
+| `demo.py` | No | Emits raw `chat.completion.chunk` payloads for the shared decoder, not events directly. |
+| `config.py` | Shape only | `RAG_OPENAI_*` variables: `BASE_URL`, `API_KEY`, `MODEL`, `FEEDBACK_URL`, `DEMO`. |
+| `main.py` | Mostly | Banner from `models()`; demo-only wire-trace step; a file-upload affordance for ingestion (the one intentional UI addition over `app/`); a no-op feedback endpoint tolerated. `_consume` is folded into `_stream_answer`. `_StreamState` and the render path otherwise match `app/`. |
 
 ### The cost of a separate directory
 
-`main.py`, `models.py` and the demo scaffolding are near-copies of `app/`'s. This
-is a deliberate choice: the directory is self-contained (own `pyproject.toml`, no
-shared code, no `rag` import) so it can be lifted into another repository whole.
-The price is that a change to the shared UX — the reasoning-step ordering, a
-citation panel's layout, the rating flow — must be made in both `app/` and
-`app-openai/`. That trade was made knowingly; if the two ever need to diverge
-further, the duplication stops being a cost.
+`main.py` and the demo scaffolding began as near-copies of `app/`'s, and the
+directory is self-contained (own `pyproject.toml`, no shared code, no `rag`
+import) so it can be lifted into another repository whole. The two have since
+diverged more than the wire dialect alone forced — the `Event` `NamedTuple`, the
+folded stream loop, the trimmed config — because for this client simplicity was
+worth more than staying in lockstep with `app/`. A shared-UX change (the
+reasoning-step ordering, a citation panel's layout, the rating flow) still has
+to be made in both, but the two are no longer meant to be identical.
